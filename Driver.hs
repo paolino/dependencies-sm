@@ -21,7 +21,6 @@
 --
 module Driver (Driver (..), bootDriver, New (..) , Build, Graph) where
 
-import Prelude hiding (reverse)
 import Data.Set (Set)
 import Data.List (find)
 import qualified Data.Set as S
@@ -39,7 +38,7 @@ data Analyze a = Analyze
     { graph   :: Graph a  -- actual dependency graph
     , todo    :: Set a    -- items to be built
     , done    :: Set a    -- items built
-    } deriving Show
+    } 
 
 -- | A new item for the driver
 data New a = New {
@@ -54,12 +53,12 @@ insertNews :: (Show a, Ord a, Eq a)   => Graph a    -- previous graph
                               -> [New a]     -- news from the build action
                               -> Analyze a  -- new state
 insertNews prev  (Analyze g rs ds) news =
-  let   ng = fromList . map (item &&& S.fromList . deps) $ news
+  let   ng = newGraph . map (item &&& S.fromList . deps) $ news
         nrs = S.fromList . map item . filter rebuild $ news
         g' = g `mappend` ng -- new current graph
         igns = nodes ng `S.difference` nrs -- items mentioned only in the graph (not marked as todo from outside)
         cdeps = S.fromList $ filter (\x -> x `neighbours` prev /= x `neighbours` g') $ S.toList $ igns -- touched father items
-        rdeps =  reachableNodes (nrs `mappend` mempty) (reverse g') -- dependants of asked items and touched father items
+        rdeps =  reachables (nrs `mappend` mempty) (reverseGraph g') -- dependants of asked items and touched father items
         in Analyze g' ((rs `mappend` rdeps) `S.difference` ds) ds
 
 -- | Build action interface, from a item to some new items. Client can use monad m for his businnes

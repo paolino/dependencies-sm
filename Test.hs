@@ -1,6 +1,5 @@
 {-# LANGUAGE StandaloneDeriving #-}
 
-import Prelude hiding (reverse)
 import Control.Monad
 import Control.Arrow 
 import qualified Data.Set as S
@@ -39,7 +38,7 @@ instance Ord a => Monoid (Collect a) where
   mempty = (Collect (mempty,mempty))
 
 mkGraph :: Ord a => [New a] -> Graph a 
-mkGraph = fromList . map (item &&& S.fromList . deps)
+mkGraph = newGraph . map (item &&& S.fromList . deps)
 
 testNoPrev = do 
   g <- graph
@@ -50,7 +49,7 @@ testNoPrev = do
         return (rs,ns)
   monadic (flip evalState mempty) $ do
     let consume Cycle = return False
-        consume (Done g'') = run $ gets (\(Collect (x,y)) -> x == reachableNodes y (reverse g''))
+        consume (Done g'') = run $ gets (\(Collect (x,y)) -> x == reachables y (reverseGraph g''))
         consume (Step f) = let
             q x = do
               (rs,ns) <- pick pg

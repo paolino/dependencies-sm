@@ -1,17 +1,13 @@
--- | Internal structure of the Graph type. Not exported outside of the
--- library.
+-- | Directed Graph library.
 --
-{-# LANGUAGE GeneralizedNewtypeDeriving, DeriveDataTypeable #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Graph
     ( Graph
-    , fromList
-    , member
+    , newGraph
     , nodes
     , neighbours
-    , reverse
-    , reachableNodes
-    , sanitize
-    , graphContents
+    , reverseGraph
+    , reachables
     ) where
 
 import Data.Maybe (fromMaybe)
@@ -27,61 +23,20 @@ import Data.Binary (Binary, put, get)
 import Data.Typeable (Typeable)
 import Debug.Trace
 
--- | A node in the directed graph
---
-data Node a = Node
-    { nodeTag        :: a      -- ^ Tag identifying the node
-    , nodeNeighbours :: Set a  -- ^ Edges starting at this node
-    } deriving (Show, Typeable)
+-- A node in the directed graph
+newtype Node a = Node {links :: Set a} deriving (Binary, Monoid)
 
-instance (Binary a, Ord a) => Binary (Node a) where
-    put (Node t n) = put t >> put n
-    get = Node <$> get <*> get
-
--- | Append two nodes. Useful for joining graphs.
---
-appendNodes :: Ord a => Node a -> Node a -> Node a
-appendNodes (Node t1 n1) (Node t2 n2)
-    | t1 /= t2 = error'
-    | otherwise = Node t1 (n1 `S.union` n2)
-  where
-    error' = error $ "Graph: Appending differently tagged nodes"
-
--- | Type used to represent a directed graph
---
-newtype Graph a = Graph {unGraph :: Map a (Node a)}
-                        deriving (Show, Binary, Typeable)
-
--- | Allow users to concatenate different graphs
---
-instance Ord a => Monoid (Graph a) where
-    mempty = Graph M.empty
-    mappend (Graph m1) (Graph m2) = Graph $
-        M.unionWith appendNodes m1 m2
-
-nodeContents :: Ord a => Node a -> S.Set a
-nodeContents (Node x ys) = x `S.insert` ys
-
-graphContents :: Ord a => Graph a -> S.Set a
-graphContents = S.unions . map nodeContents . M.elems . unGraph
+-- | A directed graph
+newtype Graph a = Graph {unGraph :: Map a (Node a)} deriving (Binary, Monoid)
 
 
 -- | Construction of directed graphs
 --
-fromList :: Ord a
+newGraph :: Ord a
          => [(a, Set a)]     -- ^ List of (node, reachable neighbours)
          -> Graph a  -- ^ Resulting directed graph
-fromList = Graph . M.fromList . map (\(t, d) -> (t, Node t d))
+newGraph = Graph . M.fromList . map (\(t, d) -> (t, Node d))
 
-
-
--- | Check if a node lies in the given graph
---
-member :: Ord a
-       => a                -- ^ Node to check for
-       -> Graph a  -- ^ Directed graph to check in
-       -> Bool             -- ^ If the node lies in the graph
-member n = M.member n . unGraph
 
 -- | Get all nodes in the graph
 --
@@ -96,23 +51,20 @@ neighbours :: Ord a
            => a                -- ^ Node to get the neighbours of
            -> Graph a  -- ^ Graph to search in
            -> Set a            -- ^ Set containing the neighbours
-neighbours x = fromMaybe S.empty . fmap nodeNeighbours
-             . M.lookup x . unGraph
+neighbours x = fromMaybe S.empty . fmap links . M.lookup x . unGraph
 
 -- | Reverse a directed graph (i.e. flip all edges)
 --
-reverse :: Ord a
+reverseGraph :: Ord a
         => Graph a
         -> Graph a
-reverse = mconcat . map reverse' . M.toList . unGraph
-  where
-    reverse' (id', Node _ neighbours') = fromList $
-        zip (S.toList neighbours') $ repeat $ S.singleton id'
+reverseGraph = mconcat . map reverse' . M.toList . unGraph
+  where reverse' (id', Node neighbours') = newGraph $ zip (S.toList neighbours') $ repeat $ S.singleton id'
 
 -- | Find all reachable nodes from a given set of nodes in the directed graph
 --
-reachableNodes :: Ord a => Set a -> Graph a -> Set a
-reachableNodes set graph = reachable (setNeighbours set) set
+reachables :: Ord a => Set a -> Graph a -> Set a
+reachables set graph = reachable (setNeighbours set) set
   where
     reachable next visited
         | S.null next = visited
@@ -123,10 +75,4 @@ reachableNodes set graph = reachable (setNeighbours set) set
 
     setNeighbours = S.unions . map (`neighbours` graph) . S.toList
     
--- | Remove all dangling pointers, i.e. references to nodes that do 
--- not actually exist in the graph.
---
-sanitize :: Ord a => Graph a -> Graph a
-sanitize (Graph graph) = Graph $ M.map sanitize' graph
-  where
-    sanitize' (Node t n) = Node t $ S.filter (`M.member` graph) n
+
