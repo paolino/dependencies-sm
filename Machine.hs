@@ -19,9 +19,9 @@ data Analyze a = Analyze
 
 -- | A new target for the machine
 data New a = New {
-  target :: a,      -- the new target
-  rebuild :: Bool,  -- force rebuilding
-  deps :: [a]       -- its dependencies
+  target :: a,      -- ^ the new target
+  rebuild :: Bool,  -- ^ force rebuilding
+  deps :: [a]       -- ^ its dependencies
   }
 
 -- compute a new state for the machine. aside widening the graph new targets are inserted in the todo
@@ -42,11 +42,13 @@ insertNews prev  (Analyze g rs ds) news =
 type Build m a = a -> m [New a]
 
 -- | State machine to drive the building of targets.
-data Machine m a    = Done (Graph a)  -- | Work is over, the graph given is useful for next run
-                    | Cycle           -- | A cycle was detected, abort
-                    | Step (Build m a -> m (Machine m a)) -- | machine regular stepping 
+data Machine m a    = Done (Graph a)  -- ^ Work is over, the graph given is useful for next run
+                    | Cycle           -- ^ A cycle was detected, abort
+                    | Step (Build m a -> m (Machine m a)) -- ^ machine regular stepping 
 
--- | Boot an machine from the previous graph. Use mempty when it's missing.
+
+-- | Boot a machine from the previous graph. Use mempty when it's missing.
+bootMachine :: (Ord a, Functor m, Monad m) => Graph a -> Machine m a
 bootMachine prev = step prev $ Analyze mempty mempty mempty
 
 -- check the Done state or fire a research for a target to build
