@@ -70,10 +70,10 @@ data Driver m a    = Done (Graph a)  -- ^ Work is over, the graph given is usefu
 
 -- | Boot a driver from the previous graph. Use mempty when it's missing.
 bootDriver :: (Ord a, Functor m, Monad m) 
-  => [a]        -- ^ items requesting building
-  -> Graph a    -- ^ previous graph
+  => Graph a    -- ^ previous graph
+  -> [New a]    -- ^ boot request
   -> Driver m a -- ^ resulting driver
-bootDriver todos prev = step prev $ Analyze mempty (S.fromList todos) mempty 
+bootDriver prev = step prev . insertNews prev (Analyze mempty mempty mempty) 
 
 -- check the Done state or fire a research for a item to build
 step :: (Functor m, Ord a, Monad m) => Graph a -> Analyze a -> Driver m a
