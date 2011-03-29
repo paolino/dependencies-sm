@@ -25,6 +25,7 @@ import qualified Data.Set as S
 
 import Data.Binary (Binary, put, get)
 import Data.Typeable (Typeable)
+import Debug.Trace
 
 -- | A node in the directed graph
 --

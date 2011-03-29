@@ -21,12 +21,15 @@
 --
 module Driver (Driver (..), bootDriver, New (..) , Build, Graph) where
 
+import Prelude hiding (reverse)
 import Data.Set (Set)
+import Data.List (find)
 import qualified Data.Set as S
 import qualified Data.Map as M
 import Control.Arrow ((&&&),(***))
 import Control.Applicative ((<$>))
 import Data.Monoid (Monoid, mappend, mempty)
+import Debug.Trace
 
 import Graph
 
@@ -36,7 +39,7 @@ data Analyze a = Analyze
     { graph   :: Graph a  -- actual dependency graph
     , todo    :: Set a    -- items to be built
     , done    :: Set a    -- items built
-    }
+    } deriving Show
 
 -- | A new item for the driver
 data New a = New {
@@ -46,18 +49,18 @@ data New a = New {
   }
 
 -- compute a new state for the driver. aside widening the graph new items are inserted in the todo
-insertNews :: (Ord a, Eq a)   => Graph a    -- previous graph
+insertNews :: (Show a, Ord a, Eq a)   => Graph a    -- previous graph
                               -> Analyze a  -- current state
                               -> [New a]     -- news from the build action
                               -> Analyze a  -- new state
 insertNews prev  (Analyze g rs ds) news =
   let   ng = fromList . map (item &&& S.fromList . deps) $ news
-        nrs = S.fromList . map fst . filter snd . map (item &&& rebuild) $ news
+        nrs = S.fromList . map item . filter rebuild $ news
         g' = g `mappend` ng -- new current graph
         igns = nodes ng `S.difference` nrs -- items mentioned only in the graph (not marked as todo from outside)
         cdeps = S.fromList $ filter (\x -> x `neighbours` prev /= x `neighbours` g') $ S.toList $ igns -- touched father items
-        rdeps = reachableNodes (nrs `mappend` cdeps) g' -- dependants of asked items and touched father items
-  in Analyze g' (rs `mappend` (rdeps `S.difference` ds)) ds
+        rdeps =  reachableNodes (nrs `mappend` mempty) (reverse g') -- dependants of asked items and touched father items
+        in Analyze g' ((rs `mappend` rdeps) `S.difference` ds) ds
 
 -- | Build action interface, from a item to some new items. Client can use monad m for his businnes
 type Build m a = a -> m [New a]
@@ -69,35 +72,22 @@ data Driver m a    = Done (Graph a)  -- ^ Work is over, the graph given is usefu
 
 
 -- | Boot a driver from the previous graph. Use mempty when it's missing.
-bootDriver :: (Ord a, Functor m, Monad m) 
+bootDriver :: (Show a,Ord a, Functor m, Monad m) 
   => Graph a    -- ^ previous graph
   -> [New a]    -- ^ boot request
   -> Driver m a -- ^ resulting driver
 bootDriver prev = step prev . insertNews prev (Analyze mempty mempty mempty) 
 
 -- check the Done state or fire a research for a item to build
-step :: (Functor m, Ord a, Monad m) => Graph a -> Analyze a -> Driver m a
-step prev r = case S.null $ todo r of
+step :: (Show a,Functor m, Ord a, Monad m) => Graph a -> Analyze a -> Driver m a
+step prev r@(Analyze g todos dones) = case S.null $ todo r of
     -- No remaining items, spits out the new graph
-    True -> Done $ graph r
+    True -> Done $ g
     -- An item remains, let's find a ready item
-    False -> findReady prev r $ S.findMin $ todo r
-
---  Find an item ready to be compiled. Goes straight down to the *left* until an item with all dependencies done is found.
-findReady :: (Functor m, Monad m, Ord a) => Graph a -> Analyze a -> a -> Driver m a
-findReady prev r x = findReady' r x S.empty where
-    findReady' r@(Analyze g todos dones) x vs
-        -- We already visited this item, cycle detected!
-        | x `S.member` vs = Cycle
-        -- The x has all neighbours in done set
-        | neighbours x g `S.isSubsetOf` dones = let 
-                insertion = insertNews prev $ Analyze g (x `S.delete` todos) (x `S.insert` dones)
-                in Step $ \f -> step prev <$> insertion <$> f x
-        -- Continue our search: find a neighbour we haven't visited yet
-        | otherwise = let   ds = neighbours x g `S.difference` vs 
-                            x = S.findMin ds
-                      in if S.null ds then Cycle else findReady' r x (S.insert x vs)
-
+    False -> case find (\t -> S.null (neighbours t g `S.intersection` todos)) . S.toList $ todos of
+        Nothing -> Cycle
+        Just x ->   let insertion = insertNews prev $ Analyze g (x `S.delete` todos) (x `S.insert` dones)
+                    in Step $ \f -> step prev <$> insertion <$> f x
 
 
 
