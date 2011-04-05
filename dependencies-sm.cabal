@@ -48,15 +48,14 @@ Cabal-version:       >=1.2
 
 Library
   -- Modules exported by the library.
-  Exposed-modules: Driver
-  
+  Exposed-modules: Dependency.Manager, Dependency.Core
   -- Packages needed in order to build this package.
   Build-depends:       
     base <5,
     binary, 
     containers
   -- Modules not exported by this package.
-  Other-modules: Graph
+  Other-modules: 
   
   -- Extra tools (e.g. alex, hsc2hs, ...) needed to build the source.
   -- Build-tools:         
