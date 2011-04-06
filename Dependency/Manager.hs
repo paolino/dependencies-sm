@@ -1,5 +1,5 @@
 {-# LANGUAGE NoMonomorphismRestriction #-}
--- | Dependency manager. A thin layer on Dependency. Core for monadic builders.
+-- | Dependency manager. A thin layer on Dependency.Core for monadic builders.
 module Dependency.Manager (Item (Item), Manager, insertItems, deleteItems, touchItems, update, newManager)  where
 
 import Control.Applicative ((<$>))

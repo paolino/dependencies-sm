@@ -1,7 +1,7 @@
 {-# LANGUAGE NoMonomorphismRestriction, ViewPatterns #-}
 -- | Core dependency manager.
 module Dependency.Core
-  (Yield (..)
+  ( Yield (..)
   , Create
   , create
   , Delete
@@ -22,62 +22,115 @@ import Data.Monoid (mempty)
 import Data.Maybe (catMaybes)
 import Prelude hiding (null)
 
-data Logic b a = Logic {
-  logic :: a,
+
+-- Logic dependencies layer
+data Logic b = Logic {
   dependencies :: b -> Bool,
   dependants :: Set b
   }
 
-instance Functor (Logic b) where
-  fmap f (Logic x y z) = Logic (f x) y z
-
-
-data Existence b a = Existence {
-  existence :: a ,
+-- Existence dependency layer
+data Existence b = Existence {
   belongs :: Maybe b,
   holds :: Set b
   }
 
-instance Functor (Existence b) where
-  fmap f (Existence x y z) = Existence (f x) y z
-
-
 -------------------------------------------
 
+-- A dependency node.
 data Node b a = Node {
   index :: b,
-  load :: a
+  core :: a,
+  logic :: Logic b,
+  existence :: Existence b
   }
+
 instance Functor (Node b) where
-  fmap f (Node x l) = Node x (f l)
+  fmap f n = n{core = f $ core n}
 
-type NodesL b a = [NodeL b a]
+type Nodes b a = [Node b a]
 
-type NodeL b a = Node b (Existence b (Logic b a))
+-- O(n). cons a new node after collecting its dependants. 
+insertNode :: Ord b => Nodes b a  -> b -> a -> (b -> Bool) -> Maybe b -> Nodes b a
+insertNode ns x y f mr = Node x y (Logic f qs) (Existence mr mempty):ns where
+  qs  = fromList . map index $ filter (($x) . dependencies . logic) $ ns
 
-insertNode :: Ord b => NodesL b a  -> b -> a -> (b -> Bool) -> Maybe b -> NodesL b a
-insertNode ns x y f mr = Node x (Existence (Logic  y f qs) mr mempty):ns where
-  qs  = fromList . map index $ filter (($x) . dependencies . existence . load) $ ns
 
-
-flood :: Ord b =>  (NodeL b a -> Set b) -> Maybe (a -> a) -> Set b -> NodesL b a  -> NodesL b a
+flood :: Ord b =>  (Node b a -> Set b) -> Maybe (a -> a) -> Set b -> Nodes b a  -> Nodes b a
 flood s t xs ns 
             | null xs = ns 
             | True = let 
               x = findMin xs
               (xs',ns') = mapAccumL f xs ns 
               f ts n | index n == x = let
-                in (ts `union` s n, (\f -> fmap (fmap (fmap f)) n) `fmap` t)
+                in (ts `union` s n, flip fmap n `fmap` t)
               in flood s t  (S.delete x xs') (catMaybes ns')
 
-deleteNodes :: Ord b => Set b -> NodesL b a  -> NodesL b a
-deleteNodes  = flood (holds . load) Nothing
+deleteNodes :: Ord b => Set b -> Nodes b a  -> Nodes b a
+deleteNodes  = flood (holds . existence) Nothing
 
-modifyHolds :: Ord b => (a -> a) -> Set b -> NodesL b a  -> NodesL b a
-modifyHolds f = flood (holds . load) (Just f)
+modifyHolds :: Ord b => (a -> a) -> Set b -> Nodes b a  -> Nodes b a
+modifyHolds f = flood (holds . existence) (Just f)
 
-modifyDependants :: Ord b =>  (a -> a) -> Set b -> NodesL b a  -> NodesL b a
-modifyDependants  f = flood (dependants . existence . load) (Just f)
+modifyDependants :: Ord b =>  (a -> a) -> Set b -> Nodes b a  -> Nodes b a
+modifyDependants  f = flood (dependants . logic) (Just f)
+
+-----------------------------------------------------------------
+type NodeT b a = Node b (Yield a)
+type NodesT b a = Nodes b (Yield a)
+
+--- mark rules ---------------------------
+setBuild ::  Yield a -> Yield a
+setBuild (Uptodate x) = Build x
+setBuild y = y
+
+setUnlink ::  Yield a -> Yield a
+setUnlink (Uptodate x) = Unlink x
+setUnlink (Build x) = Unlink x
+setUnlink x = x
+
+setUptodate ::  Yield a -> Yield a
+setUptodate (Build x) = Uptodate x
+setUptodate (Unlink x) = Unlink x
+setUptodate x = x
+
+isUptodate ::  Yield a -> Bool
+isUptodate (Uptodate x) = True
+isUptodate _ = False
+
+-----------------------------------------------
+--
+-- Helper methods for Core object
+--
+----------------------------------------------
+
+
+create' :: Ord b =>  NodesT b a -> b -> a -> (b -> Bool) -> Maybe b ->  NodesT b a
+create' ns x y f mr = modifyDependants setBuild (fromList [x]) $ insertNode ns x (Build y) f mr 
+
+delete' :: Ord b =>  NodesT b a -> b -> NodesT b a
+delete' ns x = modifyHolds setUnlink (fromList [x]) $ ns
+
+touch' :: Ord b =>  NodesT b a -> b -> NodesT b a
+touch' ns x = modifyDependants setBuild (fromList [x]) . modifyHolds setUnlink ds $ ns where
+  ds = unions . map (holds . existence) . filter ((== x) . index) $ ns
+
+step' :: NodesT b a -> (Yield a, NodesT b a)
+step' [] = (Empty,[])
+step' ns@(n:ns') = case break g ns of
+  (_,[]) -> (core n,ns' ++ [n])
+  (fs,n:ss) -> case core n of
+    d@(Unlink _) -> (d,fs ++ ss)
+    b@(Build _) -> (b,fs ++ ss ++ [fmap setUptodate n])
+  where
+  g (core -> Unlink _) = True
+  g n@(core -> Build _) = all (isUptodate . core) . filter ((dependencies . logic $ n) . index ) $ ns
+  g _ = False
+
+------------------------------------------------------------------------------------------------------
+-- Interface.
+------------------------------------------------------------------------------------------------------
+
 
 -- | Yielded values from a manager. The constructor tagging mark the item for the client to act accordingly
 data Yield a 
@@ -113,56 +166,7 @@ data Core b a = Core
   , step    :: Step b a
   }
 
-
------------------------------------------------------------------
-type NodeT b a = NodeL b (Yield a)
-type NodesT b a = NodesL b (Yield a)
-
-
-setBuild (Uptodate x) = Build x
-setBuild y = y
-
-setUnlink (Uptodate x) = Unlink x
-setUnlink (Build x) = Unlink x
-setUnlink x = x
-
-setUptodate (Build x) = Uptodate x
-setUptodate (Unlink x) = Unlink x
-setUptodate x = x
-
-isUptodate (Uptodate a) = True
-isUptodate _ = False
-
-getTainted = logic . existence . load
-
-
-create' :: Ord b =>  NodesT b a -> b -> a -> (b -> Bool) -> Maybe b ->  NodesT b a
-create' ns x y f mr = insertNode ns x (Build y) f mr 
-
-delete' :: Ord b =>  NodesT b a -> b -> NodesT b a
-delete' ns x = modifyHolds setUnlink (fromList [x]) $ ns
-
-touch' :: Ord b =>  NodesT b a -> b -> NodesT b a
-touch' ns x = let 
-  ts = filter ((== x) . index) ns
-  ds = unions $ map (holds . load) ts
-  in modifyDependants setBuild (fromList [x]) . modifyHolds setUnlink ds $ ns
-
-step' :: NodesT b a -> (Yield a, NodesT b a)
-step' [] = (Empty,[])
-step' ns@(n:ns') = case break g ns of
-  (_,[]) -> (getTainted n,ns' ++ [n])
-  (fs,n:ss) -> case getTainted n of
-    d@(Unlink _) -> (d,fs ++ ss)
-    b@(Build _) -> (b,fs ++ ss ++ [fmap (fmap (fmap setUptodate)) n])
-  where
-  g (getTainted -> Unlink _) = True
-  g n@(getTainted -> Build _) = let
-    deps = dependencies . existence . load $ n
-    rs = filter (deps . index) ns
-    in all (isUptodate . getTainted) rs
-  g _ = False
-
+-- | Build an empty concrete Core object
 mkCore = mk [] where
   mk ns = Core (\x y f mr -> mk $ create' ns x y f mr) (mk . delete' ns) (mk . touch' ns) (second mk $ step' ns)
 
