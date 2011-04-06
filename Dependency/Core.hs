@@ -40,20 +40,22 @@ data Existence b = Existence {
 -- A dependency node.
 data Node b a = Node {
   index :: b,
-  core :: a,
+  value :: a,
   logic :: Logic b,
   existence :: Existence b
   }
 
 instance Functor (Node b) where
-  fmap f n = n{core = f $ core n}
+  fmap f n = n{value = f $ value n}
 
 type Nodes b a = [Node b a]
 
 -- O(n). cons a new node after collecting its dependants. 
 insertNode :: Ord b => Nodes b a  -> b -> a -> (b -> Bool) -> Maybe b -> Nodes b a
-insertNode ns x y f mr = Node x y (Logic f qs) (Existence mr mempty):ns where
-  qs  = fromList . map index $ filter (($x) . dependencies . logic) $ ns
+insertNode ns x y f mr 
+  | x `elem` map index ns = error "Dependency.Core: multiple values for an index are not supported."
+  | otherwise             = Node x y (Logic f qs) (Existence mr mempty):ns where
+      qs = fromList . map index $ filter (($x) . dependencies . logic) $ ns
 
 
 flood :: Ord b =>  (Node b a -> Set b) -> Maybe (a -> a) -> Set b -> Nodes b a  -> Nodes b a
@@ -62,9 +64,10 @@ flood s t xs ns
             | True = let 
               x = findMin xs
               (xs',ns') = mapAccumL f xs ns 
-              f ts n | index n == x = let
-                in (ts `union` s n, flip fmap n `fmap` t)
-              in flood s t  (S.delete x xs') (catMaybes ns')
+              f ts n 
+		            | index n == x = (ts `union` s n, flip fmap n `fmap` t)
+		            | otherwise = (ts, Just n)
+              in flood s t (S.delete x xs') (catMaybes ns')
 
 deleteNodes :: Ord b => Set b -> Nodes b a  -> Nodes b a
 deleteNodes  = flood (holds . existence) Nothing
@@ -118,13 +121,13 @@ touch' ns x = modifyDependants setBuild (fromList [x]) . modifyHolds setUnlink d
 step' :: NodesT b a -> (Yield a, NodesT b a)
 step' [] = (Empty,[])
 step' ns@(n:ns') = case break g ns of
-  (_,[]) -> (core n,ns' ++ [n])
-  (fs,n:ss) -> case core n of
+  (_,[]) -> (value n,ns' ++ [n])
+  (fs,n:ss) -> case value n of
     d@(Unlink _) -> (d,fs ++ ss)
     b@(Build _) -> (b,fs ++ ss ++ [fmap setUptodate n])
   where
-  g (core -> Unlink _) = True
-  g n@(core -> Build _) = all (isUptodate . core) . filter ((dependencies . logic $ n) . index ) $ ns
+  g (value -> Unlink _) = True
+  g n@(value -> Build _) = all (isUptodate . value) . filter ((dependencies . logic $ n) . index ) $ ns
   g _ = False
 
 ------------------------------------------------------------------------------------------------------
