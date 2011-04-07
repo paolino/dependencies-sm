@@ -12,16 +12,18 @@ module Dependency.Core
   , step 
   , Core
   , mkCore
+  , IndexError (..)
+  , dump
   )where
 
-import Control.Arrow (second)
+import Control.Arrow (second, (&&&))
 import Data.Set (Set, fromList, toList, union, unions,  findMin,  null)
 import qualified Data.Set as S
 import Data.List (mapAccumL, find)
 import Data.Monoid (mempty)
 import Data.Maybe (catMaybes)
 import Prelude hiding (null)
-
+import Debug.Trace
 
 -- Logic dependencies layer
 data Logic b = Logic {
@@ -50,18 +52,44 @@ instance Functor (Node b) where
 
 type Nodes b a = [Node b a]
 
--- O(n). cons a new node after collecting its dependants. 
-insertNode :: Ord b => Nodes b a  -> b -> a -> (b -> Bool) -> Maybe b -> Nodes b a
-insertNode ns x y f mr 
-  | x `elem` map index ns = error "Dependency.Core: multiple values for an index are not supported."
-  | otherwise             = Node x y (Logic f qs) (Existence mr mempty):ns where
-      qs = fromList . map index $ filter (($x) . dependencies . logic) $ ns
+addDeps n x = n{logic = let q = logic n in q{dependants = x `S.insert` dependants q}}
+addHolds n x = n{existence = let q = existence n in q{holds = x `S.insert` holds q}}
 
+data IndexError = Cycle | Duplicate | Unbelonging deriving Show
+
+-- O(n). cons a new node after collecting its dependants. 
+insertNode :: Ord b => Nodes b a  -> b -> a -> (b -> Bool) -> Maybe b -> Either IndexError (Nodes b a)
+insertNode ns x y f mr 
+  | x `elem` map index ns = Left Duplicate
+  | otherwise  = do
+                ns'' <- bel
+                return $ Node x y (Logic f $ fromList qs) (Existence mr mempty):ns'' 
+      where
+      (qs,ns') = mapAccumL g [] ns
+      g is n = if ($x) . dependencies . logic $ n then 
+        (index n:is,if f $ index n then addDeps n x else n) else (is,n)
+      bel = case mr of 
+        Nothing -> Right ns'
+        Just e -> let (t,ns'') = mapAccumL h False ns'
+                      h c n = if index n == e then (True,addHolds n x) else (c,n)
+                  in if t then Right ns'' else Left Unbelonging
+
+cycle :: Ord b =>  (Node b a -> Set b) -> Nodes b a  -> Bool
+cycle s ns = cycle' (fromList $ map index ns) mempty
+  where cycle' xs ys
+            | null xs = False
+            | True =  let 
+                x = findMin xs
+                xs' = foldr f xs ns 
+                f n ts
+                  | index n == x = ts `union` s n
+                  | otherwise = ts
+              in if x `S.member` ys then True else cycle' (S.delete x xs') (S.insert x ys)
 
 flood :: Ord b =>  (Node b a -> Set b) -> Maybe (a -> a) -> Set b -> Nodes b a  -> Nodes b a
 flood s t xs ns 
             | null xs = ns 
-            | True = let 
+            | True =  let 
               x = findMin xs
               (xs',ns') = mapAccumL f xs ns 
               f ts n 
@@ -108,8 +136,8 @@ isUptodate _ = False
 ----------------------------------------------
 
 
-create' :: Ord b =>  NodesT b a -> b -> a -> (b -> Bool) -> Maybe b ->  NodesT b a
-create' ns x y f mr = modifyDependants setBuild (fromList [x]) $ insertNode ns x (Build y) f mr 
+create' :: Ord b =>  NodesT b a -> b -> a -> (b -> Bool) -> Maybe b -> Either IndexError (NodesT b a)
+create' ns x y f mr = modifyDependants setBuild (fromList [x]) `fmap` insertNode ns x (Build y) f mr
 
 delete' :: Ord b =>  NodesT b a -> b -> NodesT b a
 delete' ns x = modifyHolds setUnlink (fromList [x]) $ ns
@@ -141,14 +169,14 @@ data Yield a
   | Unlink a -- ^ this item must be eliminated
   | Build a -- ^ this item must be built
   | Empty -- ^ the manager has no item to manage
-
+  deriving Show
 -- | Create method. Index and value associated is given along dependency logic and existential dependency, if present.
 type Create b a 
             = b          -- ^ index for the item
             -> a          -- ^ new item
             -> (b -> Bool)-- ^ mask for dependencies
             -> Maybe b    -- ^ existence dependence 
-            -> Core b a
+            -> Either IndexError (Core b a)
 -- | All items indexed as the argument and all existential dependants will be marked to yield an Unlink 
 type Delete b a 
             = b  -- ^ index to be deleted
@@ -167,9 +195,10 @@ data Core b a = Core
   , delete  :: Delete b a
   , touch   :: Touch b a
   , step    :: Step b a
+  , dump    :: [(Yield a,Set b)]
   }
 
 -- | Build an empty concrete Core object
 mkCore = mk [] where
-  mk ns = Core (\x y f mr -> mk $ create' ns x y f mr) (mk . delete' ns) (mk . touch' ns) (second mk $ step' ns)
+  mk ns = Core (\x y f mr -> mk `fmap` create' ns x y f mr) (mk . delete' ns) (mk . touch' ns) (second mk $ step' ns) (map (value &&& dependants . logic) ns)
 
