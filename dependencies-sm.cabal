@@ -48,7 +48,7 @@ Cabal-version:       >=1.2
 
 Library
   -- Modules exported by the library.
-  Exposed-modules: Dependency.Manager, Dependency.Core
+  Exposed-modules: Dependency.Manager, Dependency.Core, Dependency.Lib
   -- Packages needed in order to build this package.
   Build-depends:       
     base <5,
@@ -60,3 +60,10 @@ Library
   -- Extra tools (e.g. alex, hsc2hs, ...) needed to build the source.
   -- Build-tools:         
   
+Executable test-dependencies-sm
+  main-is: Test.hs
+  Build-depends:       
+    base <5,
+    binary, 
+    containers,
+    QuickCheck
