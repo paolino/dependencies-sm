@@ -61,9 +61,10 @@ addHolds n x = n{existence = let q = existence n in q{holds = x `S.insert` holds
 data IndexError = Cycle | Duplicate | Unbelonging deriving Show
 
 -- 
-insertNode :: Ord b => Nodes b a  -> b -> a -> (b -> Bool) -> Maybe b -> Either IndexError (Nodes b a)
+insertNode :: Ord b => Nodes b a -> b -> a -> (b -> Bool) -> Maybe b -> Either IndexError (Nodes b a)
 insertNode ns x y f mr 
   | x `elem` map index ns = Left Duplicate
+  | f x = Left Cycle
   | otherwise  = do
                 ns'' <- case mr of
                     Nothing -> return ns'
@@ -77,7 +78,7 @@ insertNode ns x y f mr
       where
       (qs,ns') = mapAccumL g [] ns
       g is n = if ($x) . dependencies . logic $ n then 
-        (index n:is,if f $ index n then addDeps n x else n) else (is,n)
+         (index n:is,if f $ index n then addDeps n x else n) else (is,n)
       z e = mapAccumL h False ns'
         where h c n = if index n == e then (True,addHolds n x) else (c,n)
 

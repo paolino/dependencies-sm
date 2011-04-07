@@ -7,7 +7,7 @@ import Data.List
 import Debug.Trace
 import Data.Char
 
-insertIndipendent (l,s) t  = either (error . show) id $ create t l s (\x -> x == init l ) Nothing
+insertIndipendent (l,s) t  = either (error . show) id $ create t l s (`isPrefixOf` init l) Nothing
 
 item :: [String] -> Gen String
 item is =  do
@@ -25,7 +25,7 @@ consumeBuilds t = case step t of
 	(Empty,t') -> ([],t')
 	(Uptodate _,t') -> ([],t')
 	(Unlink _,t') -> consumeBuilds t'
-	(Build x,t') ->  first (x:) $ consumeBuilds t'
+	(Build x,t') ->  first ( x:) $ consumeBuilds t'
 
 buildsAll = do
 	(xs,t) <- agraph
