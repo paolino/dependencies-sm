@@ -12,7 +12,7 @@ insertIndipendent (l,s) t  = either (error . show) id $ create t l s (\x -> x ==
 item :: [String] -> Gen String
 item is =  do
     t <- elements ['a' .. 'z']
-    elements ([t] : map (++ [t]) is) `suchThat` (not . flip elem is)
+    elements ([t] : map (++ [t]) is) `suchThat` ( not . flip elem is)
 
 overlappingStrings :: Gen [String]
 overlappingStrings = do
@@ -29,7 +29,7 @@ consumeBuilds t = case step t of
 
 buildsAll = do
 	(xs,t) <- agraph
-	let (ys,_) = consumeBuilds t
+	let (ys,_) =consumeBuilds t
 	return (sort xs == sort ys)			
 
 buildsRight = do
@@ -45,7 +45,6 @@ oneTouch =  do
         let t'' = touch t' x
         let (ys',_) = consumeBuilds t''
         return $ all (\(x,ys) ->  any (`isPrefixOf` init x) ys) $ tail $ zip ys' (inits ys')
-    -- return (ys' == snd x:dropWhile ((<=) (fst x) . length) ys)
 
-main = mapM_ quickCheck [buildsAll, buildsRight]
+main = mapM_ quickCheck [buildsAll, buildsRight, oneTouch]
 

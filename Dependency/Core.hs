@@ -17,13 +17,16 @@ module Dependency.Core
   )where
 
 import Control.Arrow (second, (&&&))
-import Data.Set (Set, fromList, toList, union, unions,  findMin,  null)
+import Control.Monad (when, forM)
+import Data.Set (Set, fromList, toList, union, unions,  findMin,  null, member)
 import qualified Data.Set as S
 import Data.List (mapAccumL, find)
 import Data.Monoid (mempty)
 import Data.Maybe (catMaybes)
 import Prelude hiding (null)
 import Debug.Trace
+
+import Dependency.Lib
 
 -- Logic dependencies layer
 data Logic b = Logic {
@@ -57,39 +60,32 @@ addHolds n x = n{existence = let q = existence n in q{holds = x `S.insert` holds
 
 data IndexError = Cycle | Duplicate | Unbelonging deriving Show
 
--- O(n). cons a new node after collecting its dependants. 
+-- 
 insertNode :: Ord b => Nodes b a  -> b -> a -> (b -> Bool) -> Maybe b -> Either IndexError (Nodes b a)
 insertNode ns x y f mr 
   | x `elem` map index ns = Left Duplicate
   | otherwise  = do
-                ns'' <- bel
-                return $ Node x y (Logic f $ fromList qs) (Existence mr mempty):ns'' 
+                ns'' <- case mr of
+                    Nothing -> return ns'
+                    Just r -> let (t,ns'') = z r in
+                        if t then return ns'' else Left Unbelonging
+                let   g = Node x y (Logic f $ fromList qs) (Existence mr mempty):ns'' 
+                      gd = map (index &&& dependants . logic) g
+                      gq = map (index &&& holds . existence) g
+                when (cycleDetect gd || cycleDetect gq) $ Left Cycle
+                return g
       where
       (qs,ns') = mapAccumL g [] ns
       g is n = if ($x) . dependencies . logic $ n then 
         (index n:is,if f $ index n then addDeps n x else n) else (is,n)
-      bel = case mr of 
-        Nothing -> Right ns'
-        Just e -> let (t,ns'') = mapAccumL h False ns'
-                      h c n = if index n == e then (True,addHolds n x) else (c,n)
-                  in if t then Right ns'' else Left Unbelonging
+      z e = mapAccumL h False ns'
+        where h c n = if index n == e then (True,addHolds n x) else (c,n)
 
-cycle :: Ord b =>  (Node b a -> Set b) -> Nodes b a  -> Bool
-cycle s ns = cycle' (fromList $ map index ns) mempty
-  where cycle' xs ys
-            | null xs = False
-            | True =  let 
-                x = findMin xs
-                xs' = foldr f xs ns 
-                f n ts
-                  | index n == x = ts `union` s n
-                  | otherwise = ts
-              in if x `S.member` ys then True else cycle' (S.delete x xs') (S.insert x ys)
 
 flood :: Ord b =>  (Node b a -> Set b) -> Maybe (a -> a) -> Set b -> Nodes b a  -> Nodes b a
 flood s t xs ns 
             | null xs = ns 
-            | True =  let 
+            | True =   let 
               x = findMin xs
               (xs',ns') = mapAccumL f xs ns 
               f ts n 
