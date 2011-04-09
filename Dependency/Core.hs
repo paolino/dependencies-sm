@@ -1,7 +1,7 @@
 {-# LANGUAGE NoMonomorphismRestriction, ViewPatterns #-}
 -- | Core dependency manager.
 module Dependency.Core
-  ( Yield (..)
+  ( Yield (Unlink, Build)
   , Create
   , create
   , Delete
@@ -13,6 +13,7 @@ module Dependency.Core
   , Core
   , mkCore
   , IndexError (..)
+  , Done (..)
   , dump
   )where
 
@@ -103,6 +104,13 @@ modifyHolds f = flood (holds . existence) (Just f)
 modifyDependants :: Ord b =>  (a -> a) -> Set b -> Nodes b a  -> Nodes b a
 modifyDependants  f = flood (dependants . logic) (Just f)
 
+-- | Yielded values from a manager. The constructor tagging mark the item for the client to act accordingly
+data Yield a 
+  = Uptodate a -- ^ nothing to do
+  | Unlink a -- ^ this item must be eliminated
+  | Build a -- ^ this item must be built
+  deriving Show
+
 -----------------------------------------------------------------
 type NodeT b a = Node b (Yield a)
 type NodesT b a = Nodes b (Yield a)
@@ -132,6 +140,9 @@ isUptodate _ = False
 --
 ----------------------------------------------
 
+-- | Things are uptodate
+--
+data Done = Done
 
 create' :: Ord b =>  NodesT b a -> b -> a -> (b -> Bool) -> Maybe b -> Either IndexError (NodesT b a)
 create' ns x y f mr = modifyDependants setBuild (fromList [x]) `fmap` insertNode ns x (Build y) f mr
@@ -143,13 +154,13 @@ touch' :: Ord b =>  NodesT b a -> b -> NodesT b a
 touch' ns x = modifyDependants setBuild (fromList [x]) . modifyHolds setUnlink ds $ ns where
   ds = unions . map (holds . existence) . filter ((== x) . index) $ ns
 
-step' :: NodesT b a -> (Yield a, NodesT b a)
-step' [] = (Empty,[])
+step' :: NodesT b a -> Either Done (Yield a, NodesT b a)
+step' [] = Left Done
 step' ns@(n:ns') = case break g ns of
-  (_,[]) -> (value n,ns' ++ [n])
+  (_,[]) -> Left Done 
   (fs,n:ss) -> case value n of
-    d@(Unlink _) -> (d,fs ++ ss)
-    b@(Build _) -> (b,fs ++ ss ++ [fmap setUptodate n])
+    d@(Unlink _) -> Right (d,fs ++ ss)
+    b@(Build _) -> Right (b,fs ++ ss ++ [fmap setUptodate n])
   where
   g (value -> Unlink _) = True
   g n@(value -> Build _) = all (isUptodate . value) . filter ((dependencies . logic $ n) . index ) $ ns
@@ -160,13 +171,6 @@ step' ns@(n:ns') = case break g ns of
 ------------------------------------------------------------------------------------------------------
 
 
--- | Yielded values from a manager. The constructor tagging mark the item for the client to act accordingly
-data Yield a 
-  = Uptodate a -- ^ this item is uptodate
-  | Unlink a -- ^ this item must be eliminated
-  | Build a -- ^ this item must be built
-  | Empty -- ^ the manager has no item to manage
-  deriving Show
 -- | Create method. Index and value associated is given along dependency logic and existential dependency, if present.
 type Create b a 
             = b          -- ^ index for the item
@@ -184,7 +188,7 @@ type Touch b a
             -> Core b a
 
 -- | next programmed operation along the updated manager considering the yielded value
-type Step b a = (Yield a, Core b a)
+type Step b a = Either Done (Yield a, Core b a)
   
 -- | Abstract Core object. A bunch of closures over the internal structure.
 data Core b a = Core 
@@ -197,5 +201,9 @@ data Core b a = Core
 
 -- | Build an empty concrete Core object
 mkCore = mk [] where
-  mk ns = Core (\x y f mr -> mk `fmap` create' ns x y f mr) (mk . delete' ns) (mk . touch' ns) (second mk $ step' ns) (map (value &&& dependants . logic) ns)
+  mk ns = Core  (\x y f mr -> mk `fmap` create' ns x y f mr) 
+                (mk . delete' ns) 
+                (mk . touch' ns) 
+                (second mk `fmap` step' ns) 
+                (map (value &&& dependants . logic) ns)
 
