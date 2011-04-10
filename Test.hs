@@ -3,11 +3,17 @@ import Dependency.Core
 import Test.QuickCheck
 import Control.Monad
 import Control.Arrow
-import Data.List
+import Data.List hiding (delete)
 import Debug.Trace
 import Data.Char
 
 type TCore = Core String (String , Maybe String)
+
+consume ::  Core b a -> (([a],[a]), Core b a)
+consume t = case step t of
+  Left Done -> (([],[]),t)
+  Right (Unlink x,t') -> first (second (x:)) $consume t'
+  Right (Build x,t') ->  first (first (x:)) $ consume t'
 
 ------------------------------------------------------------------
 -- logic links
@@ -36,81 +42,95 @@ testLogic =
 
 
 
-      consumeBuilds ::  Core b a -> ([a], Core b a)
-      consumeBuilds t = case step t of
-        Left Done -> ([],t)
-        Right (Unlink _,t') -> consumeBuilds t'
-        Right (Build x,t') ->  first ( x:) $ consumeBuilds t'
 
 
       buildsAll = do
         (xs,t) <- agraph
-        let (ys,_) =consumeBuilds t
-        return (sort xs == sort (map fst ys))			
+        let ((ys,ds),_) = consume t
+        return $ sort xs == sort (map fst ys) && null ds
 
       buildsRight = do
           (xs,t) <- agraph
-          let (ys',_) = consumeBuilds t
+          let ((ys',ds),_) = consume t
           let ys = map fst ys'
           let zs = zip ys (tails ys) 
-          return (not $ any (\(x,ys) -> any (`isPrefixOf` init x) ys) zs)
+          return $ (not $ any (\(x,ys) -> any (`isPrefixOf` init x) ys) zs) && null ds
 
       oneTouch =  do
             (xs,t) <-  agraph
-            let (ys',t') = consumeBuilds t
+            let ((ys',_),t') = consume t
             fmap (all id) . forM xs $ \x -> do 
               let t'' = touch t' x
-              let (ys',_) = consumeBuilds t''
+              let ((ys',_),_) = consume t''
               let ys = map fst ys'
               let zs = x: filter (\y -> x `isPrefixOf` init y) xs
               return $  all (\(x,ys) ->  any (`isPrefixOf` init x) ys) (tail $ zip ys (inits ys)) && sort ys == sort zs
-    in buildsAll .&. buildsRight .&. oneTouch
+      oneDelete = do
+            (xs,t) <-  agraph
+            let (_,t') = consume t
+            fmap (all id) . forM xs $ \x -> do 
+              let t'' = delete t' x
+              let ((ys',ds),_) = consume t''
+              let ys = map fst ys'
+              return $ map fst ds == [x] && all (\(x,ys) ->  any (`isPrefixOf` init x) $ x:ys) (tail $ zip (x:ys) (inits (x:ys)))
+    in buildsAll .&. buildsRight .&. oneTouch .&. oneDelete
 
 -----------------------------------------------------------------------------------------------------------------------
 --- existential links
 ------------------------------------------
 
-
-insertBelongs :: String -> Maybe String -> TCore -> TCore
-insertBelongs l s t = either (error . show) id $ create t l (l,s) (const False) s
-
-
-item :: [String] -> Gen (String,Maybe String)
-item is =  do
-  t <- elements ['a' .. 'z']
-  n <- elements ([t] : map (++ [t]) is) `suchThat` ( not . flip elem is)
-  k <- case null is of
-    False -> Just `fmap` elements is -- existential dependence
-    True -> return Nothing
-  return (n,k)
-
-agraph = do
-  n <- elements [0 .. 60::Int] -- number of items
-  ns <- foldM (\xs _ -> (:xs) `fmap` item (map fst xs) ) [] [1 .. n] -- different items
-  return $ foldr (\(x,y) t -> insertBelongs x y t) mkCore ns
+testExistential = let 
+  insertBelongs :: String -> Maybe String -> TCore -> TCore
+  insertBelongs l s t = either (error . show) id $ create t l (l,s) (const False) s
 
 
+  item :: [String] -> Gen (String,Maybe String)
+  item is =  do
+    t <- elements ['a' .. 'z']
+    n <- elements ([t] : map (++ [t]) is) `suchThat` ( not . flip elem is)
+    k <- case null is of
+      False -> Just `fmap` elements is -- existential dependence
+      True -> return Nothing
+    return (n,k)
 
-{-
-consumeBuildsBl :: [String] -> Core b a -> Gen ([(a, String, String)], Core b a)
-consumeBuildsBl xs t = case step t of
-	Left Done -> return ([],t)
-	Right (Unlink _,t') -> error "unexpected unlink"
-	Right (Build x,t') -> do
-        y <- elements xs
-        x' <- item xs
-        first ((x,y,x'):) `fmap` consumeBuildsBl xs t'
+  agraph = do
+    n <- elements [0 .. 60::Int] -- number of items
+    ns <- foldM (\xs _ -> (:xs) `fmap` item (map fst xs) ) [] [1 .. n] -- different items
+    return $ (ns,foldr (\(x,y) t -> insertBelongs x y t) mkCore ns)
 
-
-aBlGraph = do 
-  (xs,t) <- agraph
-  (ys,t') <- consumeBuildsBl xs t' buildsAll, buildsRight, oneTouch
-  return $ foldr (\(x,y,x') t -> insertBelongs x' y t)
-
-        let (ys',_) = consumeBuilds t''
-        let ys = map fst ys'
--}
-
+  ancestors :: [(String,Maybe String)] -> String -> [String]
+  ancestors xs x = case lookup x xs of
+    Nothing -> error "ancestors:incoherent graph"
+    Just Nothing -> [x]
+    Just (Just y) -> x:ancestors xs y
 
 
-main = mapM_ quickCheck [testLogic]
+  buildsAll = do
+    (xs,t) <- agraph
+    let ((ys,_),_) = consume t
+    return (sort (map fst xs) == sort (map fst ys))			
+
+  oneTouch = do
+      (xs,t) <-  agraph
+      let (_,t') = consume t
+      fmap (all id) . forM xs $ \x -> do 
+        let t'' = touch t' (fst x)
+        let ((ys,zs),_) = consume t''
+        return 
+            $ ys == [x] 
+            && flip all zs (\y -> fst x `elem` ancestors xs (fst y)) 
+            && all (`elem` zs) (filter (\y -> fst x `elem` ancestors xs (fst y)) xs \\ [x]) 
+  oneDelete = do
+      (xs,t) <-  agraph
+      let (_,t') = consume t
+      fmap (all id) . forM xs $ \x -> do 
+        let t'' = delete t' (fst x)
+        let ((ys',zs),_) = consume t''
+        return $ null ys' 
+            && flip all zs (\y -> fst x `elem` ancestors xs (fst y)) 
+            && all (`elem` zs) (filter (\y -> fst x `elem` ancestors xs (fst y)) xs) 
+
+  in buildsAll .&. oneTouch .&. oneDelete
+
+
+main = quickCheck $ testLogic .&. testExistential

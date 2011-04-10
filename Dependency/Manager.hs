@@ -22,27 +22,21 @@ data Manager m b = Manager {
   update :: m (Either IndexError (Manager m b))
   }
   
-{- Not uptodate
 -- Compile all (hiding some results)
-compile :: (Ord b, Functor m, Monad m) => Core b (Item m b) -> m (Core b (Item m b))
+compile :: (Ord b, Functor m, Monad m) => Core b (Item m b) -> m (Either IndexError (Core b (Item m b)))
 compile d = case step d of
-  (Empty, _) -> return d
-  (Uptodate _ ,_) -> return d
-  (Unlink x, d') -> destroy x >> return d'
-  (Build x,d') -> foldr f d' <$> build x where
-    f (c@(Item k _ _ dm)) d = create d k c dm (Just $ index x)
+  Left Done -> return (Right d)
+  Right (Unlink x, d') -> destroy x >> return (Right d')
+  Right (Build x,d') -> foldM f d' <$> build x where
+    f d (c@(Item k _ _ dm)) = create d k c dm (Just $ index x)
 
--}
 -- | Create a fresh management, with no items controlled
 newManager ::  (Ord b , Functor m, Monad m) => Manager m b
-newManager = undefined
-{-
 newManager = let
-  insertItems' x = mkManager . news x
-  news d xs = foldM f d xs where   f (c@(Item k _ _ dm)) d = create d k c dm Nothing
+  insertItems' x = fmap mkManager . news x
+  news d xs = foldM f d xs where   f d (c@(Item k _ _ dm)) = create d k c dm Nothing
   deleteItems' x = mkManager . foldr (flip delete) x
   touchItems' x = mkManager . foldr (flip touch) x
-  update' x = mkManager <$> compile x
+  update' x = fmap mkManager <$> compile x
   mkManager x = Manager (insertItems' x) (deleteItems' x) (touchItems' x) (update' x)
   in mkManager mkCore
--}
