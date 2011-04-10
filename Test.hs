@@ -22,7 +22,7 @@ item is =  do
 
 overlappingStrings :: Gen [String]
 overlappingStrings = do
-  n <- elements [0 .. 100::Int]
+  n <- elements [0 .. 60::Int]
   foldM (\is _ -> (: is) `fmap` item is) [] [1..n]
 
 agraph ::  Gen ([String], TCore)
@@ -36,17 +36,14 @@ consumeBuilds t = case step t of
 	Right (Unlink _,t') -> consumeBuilds t'
 	Right (Build x,t') ->  first ( x:) $ consumeBuilds t'
 
-{-
-consumeBuildsBl :: [String] -> Core b a -> Gen ([a], Core b a)
+consumeBuildsBl :: [String] -> Core b a -> Gen ([(a, String, String)], Core b a)
 consumeBuildsBl xs t = case step t of
 	Left Done -> return ([],t)
 	Right (Unlink _,t') -> error "unexpected unlink"
 	Right (Build x,t') -> do
-    y <- elements xs
-    x' <- item xs
-    let t'' = insertBelongs x' y t'
-    first ( x:) `fmap` consumeBuildsBl xs t'
--}
+        y <- elements xs
+        x' <- item xs
+        first ((x,y,x'):) `fmap` consumeBuildsBl xs t'
 
 buildsAll = do
 	(xs,t) <- agraph
@@ -67,7 +64,17 @@ oneTouch =  do
         let t'' = touch t' x
         let (ys',_) = consumeBuilds t''
         let ys = map fst ys'
-        return $ all (\(x,ys) ->  any (`isPrefixOf` init x) ys) $ tail $ zip ys (inits ys)
+        let zs = x: filter (\y -> x `isPrefixOf` init y) xs
+        return $  trace (show (x, ys,zs)) $ all (\(x,ys) ->  any (`isPrefixOf` init x) ys) (tail $ zip ys (inits ys)) && sort ys == sort zs
+{-
+aBlGraph = do 
+  (xs,t) <- agraph
+  (ys,t') <- consumeBuildsBl xs t' 
+  return $ foldr (\(x,y,x') t -> insertBelongs x' y t)
+
+        let (ys',_) = consumeBuilds t''
+        let ys = map fst ys'
+-}
 
 
 

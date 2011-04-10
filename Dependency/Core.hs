@@ -17,7 +17,7 @@ module Dependency.Core
   , dump
   )where
 
-import Control.Arrow (second, (&&&))
+import Control.Arrow (second, (&&&), (***), (>>>))
 import Control.Monad (when, forM)
 import Data.Set (Set, fromList, toList, union, unions,  findMin,  null, member)
 import qualified Data.Set as S
@@ -78,8 +78,8 @@ insertNode ns x y f mr
                 return g
       where
       (qs,ns') = mapAccumL g [] ns
-      g is n = if ($x) . dependencies . logic $ n then 
-         (index n:is,if f $ index n then addDeps n x else n) else (is,n)
+      onC t f = if t then f else id
+      g is n =  onC (($x) . dependencies . logic $ n) ((index n :) *** id) . onC (f $ index n) (id *** flip addDeps x) $ (is,n)
       z e = mapAccumL h False ns'
         where h c n = if index n == e then (True,addHolds n x) else (c,n)
 
