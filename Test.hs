@@ -7,25 +7,31 @@ import Data.List hiding (delete)
 import Debug.Trace
 import Data.Char
 
-type TCore = Core String (String , Maybe String)
 
+-- dumbly consume everything yielded by a Core, It collect Build and Unlink in different list
 consume ::  Core b a -> (([a],[a]), Core b a)
 consume t = case step t of
   Left Done -> (([],[]),t)
-  Right (Unlink x,t') -> first (second (x:)) $consume t'
+  Right (Unlink x,t') -> first (second (x:)) $ consume t'
   Right (Build x,t') ->  first (first (x:)) $ consume t'
 
+
+-- choosen Core instance. The value contains the index (duplicated) and possibly the existential dependency index
+type TCore = Core String (String , Maybe String)
+
 ------------------------------------------------------------------
--- logic links
+-- logic dependencies tests. 
 -- -----------------------------------------------------------------
---
---
+
+-- logic dependency rule. An item logically depends on another if the second has an index which is strictly a beginning part of the first
+logicRule :: String -> String -> Bool
+logicRule l = (`isPrefixOf` init l)
+
 testLogic =  
     let 
-      insertIndipendent :: String -> TCore -> TCore
-      insertIndipendent l t  = either (error . show) id $ create t l (l,Nothing) (`isPrefixOf` init l) Nothing
-
-
+      
+      insertLogic :: String -> TCore -> TCore
+      insertLogic l t  = either (error . show) id $ create t l (l,Nothing) (logicRule l) Nothing
 
       item :: [String] -> Gen String
       item is =  do
@@ -38,11 +44,7 @@ testLogic =
         foldM (\is _ -> (: is) `fmap` item is) [] [1..n]
 
       agraph ::  Gen ([String], TCore)
-      agraph = (id &&& foldr insertIndipendent mkCore) `fmap` nub `fmap`  overlappingStrings
-
-
-
-
+      agraph = (id &&& foldr insertLogic mkCore) `fmap` nub `fmap`  overlappingStrings
 
       buildsAll = do
         (xs,t) <- agraph
@@ -54,7 +56,7 @@ testLogic =
           let ((ys',ds),_) = consume t
           let ys = map fst ys'
           let zs = zip ys (tails ys) 
-          return $ (not $ any (\(x,ys) -> any (`isPrefixOf` init x) ys) zs) && null ds
+          return $ (not $ any (\(x,ys) -> any (logicRule x) ys) zs) && null ds
 
       oneTouch =  do
             (xs,t) <-  agraph
@@ -63,8 +65,8 @@ testLogic =
               let t'' = touch t' x
               let ((ys',_),_) = consume t''
               let ys = map fst ys'
-              let zs = x: filter (\y -> x `isPrefixOf` init y) xs
-              return $  all (\(x,ys) ->  any (`isPrefixOf` init x) ys) (tail $ zip ys (inits ys)) && sort ys == sort zs
+              let zs = x: filter (\y -> logicRule y x) xs
+              return $  all (\(x,ys) ->  any (logicRule x) ys) (tail $ zip ys (inits ys)) && sort ys == sort zs
       oneDelete = do
             (xs,t) <-  agraph
             let (_,t') = consume t
@@ -72,7 +74,7 @@ testLogic =
               let t'' = delete t' x
               let ((ys',ds),_) = consume t''
               let ys = map fst ys'
-              return $ map fst ds == [x] && all (\(x,ys) ->  any (`isPrefixOf` init x) $ x:ys) (tail $ zip (x:ys) (inits (x:ys)))
+              return $ map fst ds == [x] && all (\(x,ys) ->  any (logicRule x) $ x:ys) (tail $ zip (x:ys) (inits (x:ys)))
     in buildsAll .&. buildsRight .&. oneTouch .&. oneDelete
 
 -----------------------------------------------------------------------------------------------------------------------
