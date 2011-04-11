@@ -134,6 +134,8 @@ isUptodate ::  Yield a -> Bool
 isUptodate (Uptodate x) = True
 isUptodate _ = False
 
+isBuild (Build x) = True
+isBuild _ = False
 -----------------------------------------------
 --
 -- Helper methods for Core object
@@ -151,8 +153,10 @@ delete' :: Ord b =>  NodesT b a -> b -> NodesT b a
 delete' ns x = modifyHolds setUnlink (fromList [x]) $ ns
 
 touch' :: Ord b =>  NodesT b a -> b -> NodesT b a
-touch' ns x = modifyDependants setBuild (fromList [x]) . modifyHolds setUnlink ds $ ns where
-  ds = unions . map (holds . existence) . filter ((== x) . index) $ ns
+touch' ns x = let 
+  ns' = modifyDependants setBuild (fromList [x])  $ ns 
+  bs = filter (isBuild . value) ns'
+  in modifyHolds setUnlink (unions $ map (holds . existence) bs) ns' 
 
 step' :: NodesT b a -> Either Done (Yield a, NodesT b a)
 step' [] = Left Done

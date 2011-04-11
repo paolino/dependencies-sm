@@ -75,7 +75,7 @@ testLogic =
               let ((ys',ds),_) = consume t''
               let ys = map fst ys'
               return $ map fst ds == [x] && all (\(x,ys) ->  any (logicRule x) $ x:ys) (tail $ zip (x:ys) (inits (x:ys)))
-    in buildsAll .&. buildsRight .&. oneTouch .&. oneDelete
+    in [buildsAll,buildsRight,oneTouch,oneDelete]
 
 -----------------------------------------------------------------------------------------------------------------------
 --- existential links
@@ -132,7 +132,63 @@ testExistential = let
             && flip all zs (\y -> fst x `elem` ancestors xs (fst y)) 
             && all (`elem` zs) (filter (\y -> fst x `elem` ancestors xs (fst y)) xs) 
 
-  in buildsAll .&. oneTouch .&. oneDelete
+  in [buildsAll,oneTouch,oneDelete]
+-----------------------------------------------------------------------------------------------------------------------
+--- mixed links
+------------------------------------------
+
+testMixed = let 
+  insertMixeds ::  String -> Maybe String -> TCore -> TCore
+  insertMixeds l s t = either (error . show) id $ create t l (l,s) (logicRule l) s
 
 
-main = quickCheck $ testLogic .&. testExistential
+  item :: [String] -> Gen (String,Maybe String)
+  item is =  do
+    t <- elements ['a' .. 'z']
+    n <- elements ([t] : map (++ [t]) is) `suchThat` ( not . flip elem is)
+    k <- case null is of
+      False -> Just `fmap` elements is -- existential dependence
+      True -> return Nothing
+    return (n,k)
+
+  agraph = do
+    n <- elements [0 .. 60::Int] -- number of items
+    ns <- foldM (\xs _ -> (:xs) `fmap` item (map fst xs) ) [] [1 .. n] -- different items
+    return $ (ns,foldr (\(x,y) t -> insertMixeds x y t) mkCore ns)
+
+  ancestors :: [(String,Maybe String)] -> String -> [String]
+  ancestors xs x = case lookup x xs of
+    Nothing -> error "ancestors:incoherent graph"
+    Just Nothing -> [x]
+    Just (Just y) -> x:ancestors xs y
+
+
+  buildsAll = do
+    (xs,t) <- agraph
+    let ((ys,_),_) = consume t
+    return (sort (map fst xs) == sort (map fst ys))			
+
+
+  buildsRight = do
+    (xs,t) <- agraph
+    let ((ys',ds),_) = consume t
+    let ys = map fst ys'
+    let zs = zip ys (tails ys) 
+    return $ (not $ any (\(x,ys) -> any (logicRule x) ys) zs) && null ds
+
+  oneTouch = do
+      (xs,t) <-  agraph
+      let (_,t') = consume t
+      fmap (all id) . forM xs $ \x -> do 
+        let t'' = touch t' (fst x)
+        let ((ys,ds),_) = consume t''
+        let yys = map fst ys
+        let zs = (x: filter (\(y,_) -> logicRule y (fst x)) xs) \\ ds
+        return $  all (\(x,ys) ->  any (logicRule x) ys) (tail $ zip yys (inits yys)) && sort yys == sort (map fst zs)
+            && flip all ds (\y -> any (\x -> fst x `elem` ancestors xs (fst y)) ys) 
+            && all (`elem` ds) (filter (\y -> any (\x -> fst x `elem` ancestors xs (fst y)) ys) xs \\ ys) 
+
+
+  in [buildsRight,buildsAll,oneTouch]
+
+main = mapM_ quickCheck $  testLogic ++ testExistential ++ testMixed 
