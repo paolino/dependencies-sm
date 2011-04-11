@@ -1,25 +1,24 @@
-{-# LANGUAGE NoMonomorphismRestriction #-}
--- | Dependency manager. A thin layer on Dependency.Core for monadic builders.
-module Dependency.Manager (Item (Item), Manager, insertItems, deleteItems, touchItems, update, newManager)  where
+-- | Dependency manager. High level interface to the library.  
+module Dependency.Manager (Item (..), Manager, newManager, insertItems, deleteItems, touchItems, update,  IndexError (..))  where
 
 import Control.Applicative ((<$>))
 import Control.Monad (foldM)
 import Dependency.Core
 
--- | Abstract client core monadic data, must be supplied. Clients can choose monad and index type.
+-- | Abstract client core monadic data. Values must be supplied by the clients. Clients can choose monad and index type.
 data Ord b => Item m b = Item 
-  { index :: b            -- ^ an index for the item
-  , build :: m [Item m b] -- ^ building action which return new Items, called when this item is built
-  , destroy :: m ()       -- ^ destroying action, called when this item is deleted
-  , depmask :: b -> Bool  -- ^ dependencies selector
+  { index :: b            -- ^ an index for the item. It must be unique, or 'Duplicate' will be detected
+  , build :: m [Item m b] -- ^ building action which return new 'Item''s, called when this item is to be built
+  , destroy :: m ()       -- ^ destroying action, called when this item is to be deleted
+  , depmask :: b -> Bool  -- ^ dependencies selector. All indices matching will be logical dependencies for this item
   }
 
--- | Manager object. First 3 methods are pure and prepare the monadic update, which is the last method.
-data Manager m b = Manager {
-  insertItems :: [Item m b] -> Either IndexError (Manager m b),
-  deleteItems :: [b] -> Manager m b,
-  touchItems :: [b] -> Manager m b,
-  update :: m (Either IndexError (Manager m b))
+-- | Manager object. 
+data Manager m b = Manager 
+  { insertItems :: [Item m b] -> Either IndexError (Manager m b) -- ^ insert new items in the manager
+  , deleteItems :: [b] -> Manager m b -- ^ schedule deletion of indices
+  , touchItems :: [b] -> Manager m b -- ^ schedule touch of indices
+  , update :: m (Either IndexError (Manager m b)) -- ^ execute everything needed to update the manager
   }
   
 -- Compile all (hiding some results)
@@ -30,7 +29,7 @@ compile d = case step d of
   Right (Build x,d') -> foldM f d' <$> build x where
     f d (c@(Item k _ _ dm)) = create d k c dm (Just $ index x)
 
--- | Create a fresh management, with no items controlled
+-- | Create a fresh manager, with no items controlled
 newManager ::  (Ord b , Functor m, Monad m) => Manager m b
 newManager = let
   insertItems' x = fmap mkManager . news x

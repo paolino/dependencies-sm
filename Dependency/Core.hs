@@ -14,7 +14,6 @@ module Dependency.Core
   , mkCore
   , IndexError (..)
   , Done (..)
-  , dump
   )where
 
 import Control.Arrow (second, (&&&), (***), (>>>))
@@ -200,7 +199,6 @@ data Core b a = Core
   , delete  :: Delete b a
   , touch   :: Touch b a
   , step    :: Step b a
-  , dump    :: [(Yield a,Set b)]
   }
 
 -- | Build an empty concrete Core object
@@ -209,5 +207,4 @@ mkCore = mk [] where
                 (mk . delete' ns) 
                 (mk . touch' ns) 
                 (second mk `fmap` step' ns) 
-                (map (value &&& dependants . logic) ns)
 

@@ -104,7 +104,6 @@ testExistential = conjoin [buildsAll,oneTouch,oneDelete]
   
     where
   
-
   agraph ::  Gen ([(String,Maybe String)], TCore)
   agraph = (id &&& foldr (\(x,y) t -> insert x y t) mkCore) `fmap` items (word . map fst)
       where
