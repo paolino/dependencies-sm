@@ -1,5 +1,5 @@
 {-# LANGUAGE NoMonomorphismRestriction, ViewPatterns #-}
--- | Core dependency manager.
+-- | Graph dependency manager.
 module Dependency.Core
   ( Yield (Unlink, Build)
   , Create
@@ -10,8 +10,8 @@ module Dependency.Core
   , touch
   , Step
   , step 
-  , Core
-  , mkCore
+  , Graph
+  , mkGraph
   , IndexError (..)
   , Done (..)
   )where
@@ -58,7 +58,11 @@ type Nodes b a = [Node b a]
 addDeps n x = n{logic = let q = logic n in q{dependants = x `S.insert` dependants q}}
 addHolds n x = n{existence = let q = existence n in q{holds = x `S.insert` holds q}}
 
-data IndexError = Cycle | Duplicate | Unbelonging deriving (Show,Eq)
+-- |  Possible errors when introducing a new node 
+data IndexError   = Cycle             -- ^ a cycle is detected in the dependency graph
+                  | Duplicate         -- ^ the index is already in the graph
+                  | Unbelonging       -- ^ the node is depending existentially on an absent index 
+                  deriving (Show,Eq)
 
 -- 
 insertNode :: Ord b => Nodes b a -> b -> a -> (b -> Bool) -> Maybe b -> Either IndexError (Nodes b a)
@@ -137,7 +141,7 @@ isBuild (Build x) = True
 isBuild _ = False
 -----------------------------------------------
 --
--- Helper methods for Core object
+-- Helper methods for Graph object
 --
 ----------------------------------------------
 
@@ -180,30 +184,31 @@ type Create b a
             -> a          -- ^ new item
             -> (b -> Bool)-- ^ mask for dependencies
             -> Maybe b    -- ^ existence dependence 
-            -> Either IndexError (Core b a)
+            -> Either IndexError (Graph b a)
 -- | All items indexed as the argument and all existential dependants will be marked to yield an Unlink 
 type Delete b a 
             = b  -- ^ index to be deleted
-            -> Core b a
+            -> Graph b a
 -- | All items indexed as the argument and their logical dependants will be marked to yield a Build. All items existentially depending on the touched items will be marked as Unlink
 type Touch b a 
             = b  -- ^ index to be touched
-            -> Core b a
+            -> Graph b a
 
 -- | next programmed operation along the updated manager considering the yielded value
-type Step b a = Either Done (Yield a, Core b a)
+type Step b a = Either Done (Yield a, Graph b a)
   
--- | Abstract Core object. A bunch of closures over the internal structure.
-data Core b a = Core 
-  { create  :: Create b a 
-  , delete  :: Delete b a
-  , touch   :: Touch b a
-  , step    :: Step b a
+-- | Abstract Graph object. A bunch of closures over the internal structure.
+data Graph b a = Graph 
+  { create  :: Create b a -- ^ insert a new node 
+  , delete  :: Delete b a -- ^ delete a node
+  , touch   :: Touch b a -- ^ touch a node
+  , step    :: Step b a -- ^ step the 'Graph'
   }
 
--- | Build an empty concrete Core object
-mkCore = mk [] where
-  mk ns = Core  (\x y f mr -> mk `fmap` create' ns x y f mr) 
+-- | Builds an empty concrete Graph object
+mkGraph ::  Ord b => Graph b a
+mkGraph = mk [] where
+  mk ns = Graph  (\x y f mr -> mk `fmap` create' ns x y f mr) 
                 (mk . delete' ns) 
                 (mk . touch' ns) 
                 (second mk `fmap` step' ns) 
