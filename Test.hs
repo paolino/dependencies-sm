@@ -1,4 +1,4 @@
-{-#LANGUAGE NoMonomorphismRestriction #-}
+
 import Dependency.Core
 import Test.QuickCheck
 import Control.Monad
@@ -53,7 +53,7 @@ word is = do
 -- logic dependencies tests. 
 -- -----------------------------
 
-testLogic =  [buildsAll,buildsRight,oneTouch,oneDelete]
+testLogic =  conjoin [buildsAll,buildsRight,oneTouch,oneDelete]
 
       where
 
@@ -65,6 +65,7 @@ testLogic =  [buildsAll,buildsRight,oneTouch,oneDelete]
 
     buildsAll, buildsRight, oneDelete, oneTouch :: Gen Bool
 
+      
     buildsAll = do
       (xs,t) <- agraph
       let ((ys,ds),_) = consume t
@@ -99,7 +100,7 @@ testLogic =  [buildsAll,buildsRight,oneTouch,oneDelete]
 --- existential dependencies tests
 --------------------------------------
 
-testExistential = [buildsAll,oneTouch,oneDelete] 
+testExistential = conjoin [buildsAll,oneTouch,oneDelete] 
   
     where
   
@@ -141,7 +142,7 @@ testExistential = [buildsAll,oneTouch,oneDelete]
 --- mixed dependencies tests
 ------------------------------
 
-testMixed = [buildsRight,buildsAll,oneTouch, oneDelete]
+testMixed = conjoin [buildsRight,buildsAll,oneTouch, oneDelete,catchDuplicate,catchUnbelonging]
   
     where
 
@@ -151,8 +152,27 @@ testMixed = [buildsRight,buildsAll,oneTouch, oneDelete]
     insert ::  String -> Maybe String -> TCore -> TCore
     insert l s = insertNode l s (logicRule l)
 
-  buildsAll, buildsRight, oneDelete, oneTouch :: Gen Bool
+  catchUnbelonging, catchDuplicate, buildsAll, buildsRight, oneDelete, oneTouch :: Gen Bool
 
+  catchDuplicate = do
+    (xs,t) <- agraph
+    if null xs then return True
+      else do
+        (x,_) <- elements xs 
+        return $ case create t x (x,Nothing) (const False) Nothing of
+          Left Duplicate -> True
+          _ -> False
+
+  catchUnbelonging = do
+    (xs,t) <- agraph
+    if null xs then return True
+      else do
+        (y,_) <- word $ map fst xs
+        (z,_) <- word $ y:map fst xs
+        return $ case create t y (y,Nothing) (const False) (Just z) of
+          Left Unbelonging -> True
+          _ -> False
+        
   buildsAll = do
     (xs,t) <- agraph
     let ((ys,_),_) = consume t
@@ -187,4 +207,4 @@ testMixed = [buildsRight,buildsAll,oneTouch, oneDelete]
             && flip all zs (\y -> fst x `elem` ancestors xs (fst y)) 
             && all (`elem` zs) (filter (\y -> fst x `elem` ancestors xs (fst y)) xs) 
 
-main = mapM_ quickCheck $  testLogic ++ testExistential ++ testMixed 
+main = quickCheck $  conjoin [testLogic,testExistential,testMixed] 

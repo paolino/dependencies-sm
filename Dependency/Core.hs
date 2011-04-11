@@ -59,7 +59,7 @@ type Nodes b a = [Node b a]
 addDeps n x = n{logic = let q = logic n in q{dependants = x `S.insert` dependants q}}
 addHolds n x = n{existence = let q = existence n in q{holds = x `S.insert` holds q}}
 
-data IndexError = Cycle | Duplicate | Unbelonging deriving Show
+data IndexError = Cycle | Duplicate | Unbelonging deriving (Show,Eq)
 
 -- 
 insertNode :: Ord b => Nodes b a -> b -> a -> (b -> Bool) -> Maybe b -> Either IndexError (Nodes b a)
