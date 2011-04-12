@@ -1,5 +1,5 @@
 -- | Dependency manager. High level interface to the library.  
-module Dependency.Manager (Item (..), Manager, newManager, insertItems, deleteItems, touchItems, update,  IndexError (Cycle,Duplicate))  where
+module Dependency.Manager (Item (..), Manager, mkManager, insertItems, deleteItems, touchItems, update,  IndexError (Cycle,Duplicate))  where
 
 import Control.Applicative ((<$>))
 import Control.Monad (foldM)
@@ -31,8 +31,8 @@ compile d = case step d of
     f d (c@(Item k _ _ dm)) = create d k c dm (Just $ index x)
 
 -- | Create a fresh manager, with no items controlled
-newManager ::  (Ord b , Functor m, Monad m) => Manager m b
-newManager = let
+mkManager ::  (Ord b , Functor m, Monad m) => Manager m b
+mkManager = let
   insertItems' x = fmap mkManager . news x
   news d xs = foldM f d xs where   f d (c@(Item k _ _ dm)) = create d k c dm Nothing
   deleteItems' x = mkManager . foldr (flip delete) x

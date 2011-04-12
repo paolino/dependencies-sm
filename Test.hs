@@ -6,17 +6,17 @@ import Control.Arrow
 import Data.List hiding (delete)
 
 
--- dumbly consume everything yielded by a Core, It collect Build and Unlink in different list
-consume ::  Core b a -> (([a],[a]), Core b a)
+-- dumbly consume everything yielded by a Graph, It collect Build and Unlink in different list
+consume ::  Graph b a -> (([a],[a]), Graph b a)
 consume t = case step t of
   Left Done -> (([],[]),t)
   Right (Unlink x,t') -> first (second (x:)) $ consume t'
   Right (Build x,t') ->  first (first (x:)) $ consume t'
 
-insertNode ::  String -> Maybe String -> (String -> Bool) -> TCore -> TCore
+insertNode ::  String -> Maybe String -> (String -> Bool) -> TGraph -> TGraph
 insertNode l s f t = either (error . show) id $ create t l (l,s) f s
--- choosen Core instance. The value contains the index (duplicated) and possibly the existential dependency index
-type TCore = Core String (String , Maybe String)
+-- choosen Graph instance. The value contains the index (duplicated) and possibly the existential dependency index
+type TGraph = Graph String (String , Maybe String)
 
 -- logic dependency rule. An item logically depends on another if the second has an index which is strictly a beginning part of the first
 logicRule :: String -> String -> Bool
@@ -57,10 +57,10 @@ testLogic =  conjoin [buildsAll,buildsRight,oneTouch,oneDelete]
 
       where
 
-    agraph ::  Gen ([String], TCore)
-    agraph = (id &&& foldr insert mkCore) `fmap` items (fmap fst . word)
+    agraph ::  Gen ([String], TGraph)
+    agraph = (id &&& foldr insert mkGraph) `fmap` items (fmap fst . word)
         where
-      insert :: String -> TCore -> TCore
+      insert :: String -> TGraph -> TGraph
       insert l = insertNode l Nothing (logicRule l)
 
     buildsAll, buildsRight, oneDelete, oneTouch :: Gen Bool
@@ -104,10 +104,10 @@ testExistential = conjoin [buildsAll,oneTouch,oneDelete]
   
     where
   
-  agraph ::  Gen ([(String,Maybe String)], TCore)
-  agraph = (id &&& foldr (\(x,y) t -> insert x y t) mkCore) `fmap` items (word . map fst)
+  agraph ::  Gen ([(String,Maybe String)], TGraph)
+  agraph = (id &&& foldr (\(x,y) t -> insert x y t) mkGraph) `fmap` items (word . map fst)
       where
-    insert :: String -> Maybe String -> TCore -> TCore
+    insert :: String -> Maybe String -> TGraph -> TGraph
     insert l s = insertNode l s (const False) 
 
   buildsAll, oneDelete, oneTouch :: Gen Bool
@@ -145,10 +145,10 @@ testMixed = conjoin [buildsRight,buildsAll,oneTouch, oneDelete,catchDuplicate,ca
   
     where
 
-  agraph ::  Gen ([(String,Maybe String)], TCore)
-  agraph = (id &&& foldr (\(x,y) t -> insert x y t) mkCore) `fmap` items (word . map fst)
+  agraph ::  Gen ([(String,Maybe String)], TGraph)
+  agraph = (id &&& foldr (\(x,y) t -> insert x y t) mkGraph) `fmap` items (word . map fst)
       where
-    insert ::  String -> Maybe String -> TCore -> TCore
+    insert ::  String -> Maybe String -> TGraph -> TGraph
     insert l s = insertNode l s (logicRule l)
 
   catchUnbelonging, catchDuplicate, buildsAll, buildsRight, oneDelete, oneTouch :: Gen Bool

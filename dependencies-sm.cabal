@@ -48,12 +48,14 @@ Cabal-version:       >=1.2
 
 Library
   -- Modules exported by the library.
-  Exposed-modules: Dependency.Manager, Dependency.Core, Dependency.Lib
+  Exposed-modules: Dependency.Manager, Dependency.Core, Dependency.Lib, Dependency.Notifier
   -- Packages needed in order to build this package.
   Build-depends:       
     base <5,
     binary, 
-    containers
+    containers,
+    hiernotify,
+    timers-updatable
   -- Modules not exported by this package.
   Other-modules: 
   
