@@ -128,6 +128,9 @@ setUnlink (Uptodate x) = Unlink x
 setUnlink (Build x) = Unlink x
 setUnlink x = x
 
+isUnlink (Unlink _) = True
+isUnlink _ = False 
+
 setUptodate ::  Yield a -> Yield a
 setUptodate (Build x) = Uptodate x
 setUptodate (Unlink x) = Unlink x
@@ -150,7 +153,7 @@ isBuild _ = False
 data Done = Done
 
 create' :: Ord b =>  NodesT b a -> b -> a -> (b -> Bool) -> Maybe b -> Either IndexError (NodesT b a)
-create' ns x y f mr = modifyDependants setBuild (fromList [x]) `fmap` insertNode ns x (Build y) f mr
+create' ns x y f mr = flip touch' x `fmap` insertNode ns x (Build y) f mr
 
 delete' :: Ord b =>  NodesT b a -> b -> NodesT b a
 delete' ns x = modifyHolds setUnlink (fromList [x]) $ ns
@@ -163,13 +166,12 @@ touch' ns x = let
 
 step' :: NodesT b a -> Either Done (Yield a, NodesT b a)
 step' [] = Left Done
-step' ns@(n:ns') = case break g ns of
-  (_,[]) -> Left Done 
-  (fs,n:ss) -> case value n of
-    d@(Unlink _) -> Right (d,fs ++ ss)
-    b@(Build _) -> Right (b,fs ++ ss ++ [fmap setUptodate n])
+step' ns = case break (isUnlink . value) ns of
+  (rs,[]) -> case break g rs of
+    (_,[]) -> Left Done 
+    (fs,b@(value -> x):ss) -> Right (x,fs ++ ss ++ [fmap setUptodate b])
+  (fs, (value -> x) :ss) -> Right (x,fs ++ ss)
   where
-  g (value -> Unlink _) = True
   g n@(value -> Build _) = all (isUptodate . value) . filter ((dependencies . logic $ n) . index ) $ ns
   g _ = False
 

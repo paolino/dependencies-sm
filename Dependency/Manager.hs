@@ -26,9 +26,10 @@ data Manager m b = Manager
 compile :: (Ord b, Functor m, Monad m) => Graph b (Item m b) -> m (Either IndexError (Graph b (Item m b)))
 compile d = case step d of
   Left Done -> return (Right d)
-  Right (Unlink x, d') -> destroy x >> return (Right d')
-  Right (Build x,d') -> foldM f d' <$> build x where
+  Right (Unlink x, d') -> destroy x >> compile d'
+  Right (Build x,d') -> (foldM f d' <$> build x) >>= either (return . Left) compile where
     f d (c@(Item k _ _ dm)) = create d k c dm (Just $ index x)
+
 
 -- | Create a fresh manager, with no items controlled
 mkManager ::  (Ord b , Functor m, Monad m) => Manager m b
