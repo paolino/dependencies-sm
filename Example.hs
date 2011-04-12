@@ -4,6 +4,9 @@ import System.FilePath
 import System.Hiernotify.Polling
 import Control.Concurrent
 import Data.List
+import Control.Monad
+import System.Process
+import System.IO
 
 -- | example
 mkItem :: Int -> Maybe String -> FilePath -> Item IO FilePath
@@ -21,5 +24,5 @@ c = Configuration "." 4 $ (not . isPrefixOf ".")
 main = do
   p <- mkPollNotifier 2 c
   r <- mkController p (mkItem 0 Nothing)
-  threadDelay $ 300 * 10 ^ 6
-  r
+  forever $ putStr "System > " >> hFlush stdout >> getLine >>= system >> return ()
+  
