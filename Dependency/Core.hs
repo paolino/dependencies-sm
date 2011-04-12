@@ -118,6 +118,7 @@ data Yield a
 type NodeT b a = Node b (Yield a)
 type NodesT b a = Nodes b (Yield a)
 
+
 --- mark rules ---------------------------
 setBuild ::  Yield a -> Yield a
 setBuild (Uptodate x) = Build x
@@ -142,6 +143,13 @@ isUptodate _ = False
 
 isBuild (Build x) = True
 isBuild _ = False
+
+data Modification = MB | MD
+
+change :: (b -> Bool) -> (a -> a)
+modification :: NodesT b a -> b -> Modification -> NodesT b a
+modification ns b MB = 
+  
 -----------------------------------------------
 --
 -- Helper methods for Graph object
