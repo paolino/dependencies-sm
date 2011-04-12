@@ -24,5 +24,5 @@ c = Configuration "." 4 $ (not . isPrefixOf ".")
 main = do
   p <- mkPollNotifier 2 c
   r <- mkController p (mkItem 0 Nothing)
-  forever $ putStr "System > " >> hFlush stdout >> getLine >>= system >> return ()
+  forever $  getLine >>= system >> return ()
   
