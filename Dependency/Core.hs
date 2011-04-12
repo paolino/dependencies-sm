@@ -156,7 +156,7 @@ create' :: Ord b =>  NodesT b a -> b -> a -> (b -> Bool) -> Maybe b -> Either In
 create' ns x y f mr = flip touch' x `fmap` insertNode ns x (Build y) f mr
 
 delete' :: Ord b =>  NodesT b a -> b -> NodesT b a
-delete' ns x = modifyHolds setUnlink (fromList [x]) $ ns
+delete' ns x = modifyDependants setBuild (fromList [x])  $modifyHolds setUnlink (fromList [x]) $ ns
 
 touch' :: Ord b =>  NodesT b a -> b -> NodesT b a
 touch' ns x = let 

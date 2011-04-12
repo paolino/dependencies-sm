@@ -14,12 +14,12 @@ mkItem n mt x = let
         build = do
               t <- maybe (readFile x) return mt
               putStrLn $ "build: " ++ x ++ " --> " ++ show (take 20 t)
-              return $ if "meta" `isPrefixOf` t then [mkItem (n + 1) (Just $ drop 4 t) $ x </> show n] else []
+              return $ if "meta" `isPrefixOf` t then [mkItem (n + 1) (Just $ drop 4 t) $ show n </> x] else []
         destroy = putStrLn $ "destroy: " ++ x
         depmask y = y `isPrefixOf` init x
         in Item x build destroy depmask
 
-c = Configuration "." 4 $ (not . isPrefixOf ".")
+c = Configuration "." 4 $ (liftM2 (&&) (not . isPrefixOf ".") (/= "Example"))
 
 main = do
   p <- mkPollNotifier 2 c
