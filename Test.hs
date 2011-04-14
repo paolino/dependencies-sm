@@ -1,209 +1,46 @@
-
-import Dependency.Core
-import Test.QuickCheck
+{-# LANGUAGE StandaloneDeriving #-}
+import Dependency.Graph
 import Control.Monad
 import Control.Arrow
+import Control.Applicative
 import Data.List hiding (delete)
+import Test.HUnit
 
 
--- dumbly consume everything yielded by a Graph, It collect Build and Unlink in different list
-consume ::  Graph b a -> (([a],[a]), Graph b a)
-consume t = case step t of
-  Left Done -> (([],[]),t)
-  Right (Unlink x,t') -> first (second (x:)) $ consume t'
-  Right (Build x,t') ->  first (first (x:)) $ consume t'
+crashOnLeft = either (error . show) id
+drawn = unfoldr (either (const Nothing) (Just . second crashOnLeft) . step)
+drawnG g =  case unfoldr (either (const Nothing) (Just . (id &&& id) . crashOnLeft . snd) . step) g of
+  [] -> g
+  xs -> last xs
 
-insertNode ::  String -> Maybe String -> (String -> Bool) -> TGraph -> TGraph
-insertNode l s f t = either (error . show) id $ create t l (l,s) f s
--- choosen Graph instance. The value contains the index (duplicated) and possibly the existential dependency index
-type TGraph = Graph String (String , Maybe String)
+create' x fx mx t = create t x x fx mx 
+erase' = flip erase
+touch' = flip touch
 
--- logic dependency rule. An item logically depends on another if the second has an index which is strictly a beginning part of the first
-logicRule :: String -> String -> Bool
-logicRule l = (`isPrefixOf` init l)
+matchError i x = case x of
+  Left i -> True
+  _ -> False
 
--- recursively collect existential deps
-ancestors :: [(String,Maybe String)] -> String -> [String]
-ancestors xs x = case lookup x xs of
-  Nothing -> error "ancestors:incoherent graph"
-  Just Nothing -> [x]
-  Just (Just y) -> x:ancestors xs y
+testDrawn s xs f = assertEqual s xs (drawn . crashOnLeft $ f mkGraph)
+testError s i f  = assertBool s . matchError i $ f mkGraph
+t0 = testDrawn "null" [Build ()] $ create' () (const False) Nothing
+t1 = testDrawn "null, cycle logic" [] $ create' () (const True) Nothing
+t2 = testError "null, unbeloning" Unbelonging $ create' () (const False) (Just ())
+t3 = testError "null, cycle logic, unbeloning" Unbelonging $ create' () (const True) (Just ())
 
-paranoia :: Int
-paranoia = 30
+t4 = testDrawn "multi" [Build 1, Build 2] $ create' 1 (<1) Nothing >=> create' 2 (<2) Nothing
+t5 = testDrawn "multi, reorder" [Build 1, Build 2] $ create' 1 (<1) Nothing <=< create' 2 (<2) Nothing
+t6 = testError "multi, duplicate" Duplicate $ create' 1 (<1) Nothing <=< create' 1 (<1) Nothing
 
--- sum up items
-items ::  ([a] -> Gen a) -> Gen [a]
-items item = do
-        n <- choose (0,paranoia)
-        foldM (\is -> const $ (: is) `fmap` item is) [] [1..n]
+t7 = testDrawn "null, touch" [Build ()] $ fmap drawnG . create' () (const False) Nothing >=> touch' ()
 
--- a new item with an existential dependency or Nothing if it's the first
-word ::  [String] -> Gen (String, Maybe String)
-word is = do 
-    t <- choose ('a','z')
-    i <- elements ([t] : map (++ [t]) is) `suchThat` ( not . flip elem is)
-    k <- case null is of
-      False -> Just `fmap` elements is 
-      True -> return Nothing
-    return (i,k)
+t8 = testDrawn "multi, touch" [Build 1, Build 2] $ fmap drawnG . (create' 1 (<1) Nothing >=> create' 2 (<2) Nothing) >=> touch' 1
+t9 = testDrawn "multi, touch part" [Build 2] $ fmap drawnG . (create' 1 (<1) Nothing >=> create' 2 (<2) Nothing) >=> touch' 2
 
-
---------------------------------
--- logic dependencies tests. 
--- -----------------------------
-
-testLogic =  conjoin [buildsAll,buildsRight,oneTouch,oneDelete]
-
-      where
-
-    agraph ::  Gen ([String], TGraph)
-    agraph = (id &&& foldr insert mkGraph) `fmap` items (fmap fst . word)
-        where
-      insert :: String -> TGraph -> TGraph
-      insert l = insertNode l Nothing (logicRule l)
-
-    buildsAll, buildsRight, oneDelete, oneTouch :: Gen Bool
-
-      
-    buildsAll = do
-      (xs,t) <- agraph
-      let ((ys,ds),_) = consume t
-      return $ sort xs == sort (map fst ys) && null ds
-
-    buildsRight = do
-        (xs,t) <- agraph
-        let ((ys',ds),_) = consume t
-        let ys = map fst ys'
-        let zs = zip ys (tails ys) 
-        return $ (not $ any (\(x,ys) -> any (logicRule x) ys) zs) && null ds
-
-    oneTouch =  do
-          (xs,t) <-  agraph
-          let ((ys',_),t') = consume t
-          fmap (all id) . forM xs $ \x -> do 
-            let t'' = touch t' x
-            let ((ys',_),_) = consume t''
-            let ys = map fst ys'
-            let zs = x: filter (\y -> logicRule y x) xs
-            return $  all (\(x,ys) ->  any (logicRule x) ys) (tail $ zip ys (inits ys)) && sort ys == sort zs
-    oneDelete = do
-          (xs,t) <-  agraph
-          let (_,t') = consume t
-          fmap (all id) . forM xs $ \x -> do 
-            let t'' = delete t' x
-            let ((ys',ds),_) = consume t''
-            let ys = map fst ys'
-            return $ map fst ds == [x] && all (\(x,ys) ->  any (logicRule x) $ x:ys) (tail $ zip (x:ys) (inits (x:ys)))
-
---------------------------------------
---- existential dependencies tests
---------------------------------------
-
-testExistential = conjoin [buildsAll,oneTouch,oneDelete] 
-  
-    where
-  
-  agraph ::  Gen ([(String,Maybe String)], TGraph)
-  agraph = (id &&& foldr (\(x,y) t -> insert x y t) mkGraph) `fmap` items (word . map fst)
-      where
-    insert :: String -> Maybe String -> TGraph -> TGraph
-    insert l s = insertNode l s (const False) 
-
-  buildsAll, oneDelete, oneTouch :: Gen Bool
-  
-  buildsAll = do
-    (xs,t) <- agraph
-    let ((ys,_),_) = consume t
-    return (sort (map fst xs) == sort (map fst ys))			
-
-  oneTouch = do
-      (xs,t) <-  agraph
-      let (_,t') = consume t
-      fmap (all id) . forM xs $ \x -> do 
-        let t'' = touch t' (fst x)
-        let ((ys,zs),_) = consume t''
-        return 
-            $ ys == [x] 
-            && flip all zs (\y -> fst x `elem` ancestors xs (fst y)) 
-            && all (`elem` zs) (filter (\y -> fst x `elem` ancestors xs (fst y)) xs \\ [x]) 
-  oneDelete = do
-      (xs,t) <-  agraph
-      let (_,t') = consume t
-      fmap (all id) . forM xs $ \x -> do 
-        let t'' = delete t' (fst x)
-        let ((ys',zs),_) = consume t''
-        return $ null ys' 
-            && flip all zs (\y -> fst x `elem` ancestors xs (fst y)) 
-            && all (`elem` zs) (filter (\y -> fst x `elem` ancestors xs (fst y)) xs) 
-
-------------------------------
---- mixed dependencies tests
-------------------------------
-
-testMixed = conjoin [buildsRight,buildsAll,oneTouch, oneDelete,catchDuplicate,catchUnbelonging]
-  
-    where
-
-  agraph ::  Gen ([(String,Maybe String)], TGraph)
-  agraph = (id &&& foldr (\(x,y) t -> insert x y t) mkGraph) `fmap` items (word . map fst)
-      where
-    insert ::  String -> Maybe String -> TGraph -> TGraph
-    insert l s = insertNode l s (logicRule l)
-
-  catchUnbelonging, catchDuplicate, buildsAll, buildsRight, oneDelete, oneTouch :: Gen Bool
-
-  catchDuplicate = do
-    (xs,t) <- agraph
-    if null xs then return True
-      else do
-        (x,_) <- elements xs 
-        return $ case create t x (x,Nothing) (const False) Nothing of
-          Left Duplicate -> True
-          _ -> False
-
-  catchUnbelonging = do
-    (xs,t) <- agraph
-    if null xs then return True
-      else do
-        (y,_) <- word $ map fst xs
-        (z,_) <- word $ y:map fst xs
-        return $ case create t y (y,Nothing) (const False) (Just z) of
-          Left Unbelonging -> True
-          _ -> False
-        
-  buildsAll = do
-    (xs,t) <- agraph
-    let ((ys,_),_) = consume t
-    return (sort (map fst xs) == sort (map fst ys))			
-
-  buildsRight = do
-    (xs,t) <- agraph
-    let ((ys',ds),_) = consume t
-    let ys = map fst ys'
-    let zs = zip ys (tails ys) 
-    return $ (not $ any (\(x,ys) -> any (logicRule x) ys) zs) && null ds
-
-  oneTouch = do
-      (xs,t) <-  agraph
-      let (_,t') = consume t
-      fmap (all id) . forM xs $ \x -> do 
-        let t'' = touch t' (fst x)
-        let ((ys,ds),_) = consume t''
-        let yys = map fst ys
-        let zs = (x: filter (\(y,_) -> logicRule y (fst x)) xs) \\ ds
-        return $  all (\(x,ys) ->  any (logicRule x) ys) (tail $ zip yys (inits yys)) && sort yys == sort (map fst zs)
-            && flip all ds (\y -> any (\x -> fst x `elem` ancestors xs (fst y)) ys) 
-            && all (`elem` ds) (filter (\y -> any (\x -> fst x `elem` ancestors xs (fst y)) ys) xs \\ ys) 
-
-  oneDelete = do
-      (xs,t) <-  agraph
-      let (_,t') = consume t
-      fmap (all id) . forM xs $ \x -> do 
-        let t'' = delete t' (fst x)
-        let ((ys',zs),_) = consume t''
-        return $ null ys' 
-            && flip all zs (\y -> fst x `elem` ancestors xs (fst y)) 
-            && all (`elem` zs) (filter (\y -> fst x `elem` ancestors xs (fst y)) xs) 
-
-main = quickCheck $  conjoin [testLogic,testExistential,testMixed] 
+t10 = testDrawn "multi, existential" [Build 1, Build 2] $ create' 1 (<1) Nothing >=> create' 2 (const False) (Just 1)
+t11 = testDrawn "multi, existential, touch" [Unlink 2, Build 1] $ fmap drawnG . (create' 1 (<1) Nothing >=> create' 2 (const False) (Just 1))
+  >=> touch' 1
+t12 =  testDrawn "multi, mixed , touch" [Unlink 2, Build 1, Build 3] $ 
+  fmap drawnG . (create' 1 (<1) Nothing >=> create' 2 (const False) (Just 1) >=> create' 3 ((==) 1) Nothing) >=> touch' 1
+t13 =  testDrawn "multi, mixed , touch" [Unlink 2, Build 1, Build 3] $ 
+  fmap drawnG . (create' 1 (<1) Nothing >=> create' 2 (const False) (Just 1) >=> create' 3 (<3) Nothing) >=> touch' 1

@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ViewPatterns, DeriveDataTypeable #-}
 
 module Dependency.Graph ( Status (Unlink, Build)
   , Create
@@ -20,6 +20,7 @@ import Prelude hiding (lookup, null, filter)
 import Data.List ((\\), break)
 import Control.Arrow (second) 
 import Debug.Trace
+import Data.Typeable
 
 data Node a b = Node 
   { value :: a
@@ -36,7 +37,7 @@ f `fmapExistence` Node x ls es = Node x ls $ f es
 data Status a 
   = Uptodate {status :: a}
   | Build {status :: a}
-  | Unlink {status :: a}
+  | Unlink {status :: a} deriving (Show,Eq)
 
 isUnlink (Unlink _) = True
 isUnlink _ = False
@@ -61,7 +62,7 @@ flood :: Ord b => Status (Node a b) -> Graph' a b -> Either IndexError (Graph' a
 flood z = ff (modi MUnlink) (existence . status $ z) <=< ff (modi MBuild) (logic . status $ z)
   where ff f xs t = foldM (flip f) t xs
 
-data IndexError = Duplicate | Unbelonging | InternalMissingKey | InternalRemovingAGoodIndex
+data IndexError = Duplicate | Unbelonging | InternalMissingKey | InternalRemovingAGoodIndex deriving (Show,Eq,Typeable)
 
 modi :: Ord b => Modi -> b -> Graph' a b -> Either IndexError (Graph' a b)
 
