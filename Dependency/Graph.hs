@@ -15,9 +15,9 @@ module Dependency.Graph ( Status (Unlink, Build)
   , Done (..)
   )where
 import Data.Map (Map, (!), empty, adjust, member, insert, delete, findWithDefault, lookup, null, filter, findMin, toList)
-import Control.Monad (when, foldM, (<=<))
+import Control.Monad (when, foldM, (<=<),(>=>))
 import Prelude hiding (lookup, null, filter)
-import Data.List ((\\), break)
+import Data.List ((\\), break, nub)
 import Control.Arrow (second) 
 import Debug.Trace
 import Data.Typeable
@@ -58,24 +58,32 @@ type Graph' a b = Map b (Status (Node a b))
 -- marker type
 data Modi = MBuild | MUnlink
 
-flood :: Ord b => Status (Node a b) -> Graph' a b -> Either IndexError (Graph' a b)
-flood z = ff (modi MUnlink) (existence . status $ z) <=< ff (modi MBuild) (logic . status $ z)
-  where ff f xs t = foldM (flip f) t xs
+dtrace g x = trace (show . g $ x) x
+lookupE x g = maybe (Left MissingKey) Right $ x `lookup` g 
 
-data IndexError = Duplicate | Unbelonging | InternalMissingKey | InternalRemovingAGoodIndex deriving (Show,Eq,Typeable)
+flood :: Ord b => b -> Graph' a b -> Either IndexError (Graph' a b)
+flood x g = do 
+  z <- lookupE x g 
+  g' <- ff (modi MUnlink) ( (existence . status) $ z) g
+  z <- lookupE x g' 
+  ff (modi MBuild) ( (logic . status) $ z) g'
+
+  where ff f xs t = foldM (flip f) t xs
+        
+
+data IndexError = Cycle | Duplicate | Unbelonging | BelongingToNotUptodate | MissingKey  | RemovingAGoodIndex deriving (Show,Eq,Typeable)
 
 modi :: Ord b => Modi -> b -> Graph' a b -> Either IndexError (Graph' a b)
 
-modi MUnlink x g = case  x `lookup` g of
-  Nothing -> Left InternalMissingKey
-  Just (Unlink _) -> Right g -- stop this branch
-  Just z -> flood z $ adjust (Unlink . status) x g -- mark as unlink and go further
+modi MUnlink x g = lookupE x g >>= f where
+  f (Unlink _) = error "Dependency.Graph: the impossible happened, sorry" -- stop the world
+  f (Build _) = Left Cycle
+  f z = flood x $ adjust (Unlink . status) ( x) g -- mark as unlink and go further
 
-modi MBuild x g = case  x `lookup` g of
-  Nothing -> Left InternalMissingKey
-  Just (Unlink _) -> Right g -- oh, stop this branch
-  Just (Build _) -> Right g -- stop this branch
-  Just z -> flood z $ adjust (Build . status) x g
+modi MBuild x g = lookupE x g >>= f where
+  f (Unlink _) = Left Cycle 
+  f (Build _) = Left Cycle
+  f z = flood x $  adjust (Build . status) ( x) g
 
 --
 
@@ -90,24 +98,25 @@ type VGraph' a b = Graph' (Value a b) b
 
 -- cons a new node and touch it
 append :: Ord b => b -> a -> (b -> Bool) -> Maybe b -> VGraph' a b -> Either IndexError (VGraph' a b)
-append x y fx mx  g= do
+append x y fx mx  g =  do
   when (x `member` g) $ Left  Duplicate
   maybe (return ()) (\x -> when (not $ x `member` g) $ Left Unbelonging) mx
+  maybe (return ()) (\x -> when (not . isUptodate $ g ! x) $ Left BelongingToNotUptodate) mx
   let   ds = map (index . value . status . snd) . toList . filter (($x) . depends . value . status) $ g
         g' = insert x (Uptodate $ Node (Value y x fx mx) ds []) g
-        g'' = fmap (\n -> if fx (index . value $ n) then (x:) `fmapLogic` n else n) `fmap` g'
+        g'' = fmap (\n -> if fx (index . value $ n) then (nub . (x:)) `fmapLogic` n else n) `fmap` g'
         g''' = case mx of
           Nothing -> g''
-          Just z -> fmap (\n -> if (index . value $ n) == z then (x:) `fmapExistence` n else n) `fmap` g''
+          Just z -> fmap (\n -> if (index . value $ n) == z then (nub . (x:)) `fmapExistence` n else n) `fmap` g''
   modi MBuild x g'''
 
 -- remove a node marked as Unlink
 remove :: Ord b => b -> VGraph' a b -> Either IndexError (VGraph' a b)
 remove x g =  let g' = fmap (fmapExistence (\\[x]) . fmapLogic (\\[x])) `fmap` g
               in case x `lookup` g' of
-                Nothing -> Left InternalMissingKey
+                Nothing -> Left MissingKey
                 Just (Unlink _) -> Right $ x `delete` g'
-                Just _ -> Left InternalRemovingAGoodIndex
+                Just _ -> Left RemovingAGoodIndex
 
 
 type ChangeGraph a b =  Either IndexError (Graph a b)
@@ -163,9 +172,9 @@ step' g = case filter isUnlink g of
 -- | Builds an empty concrete Graph object
 mkGraph ::  Ord b => Graph a b
 mkGraph = mk empty where
-  mk g = Graph  (\x y f mr -> mk `fmap` append x y f mr g) 
-                (\x -> mk `fmap` modi MUnlink x g) 
-                (\x -> mk `fmap` modi MBuild x g) 
+  mk g = Graph  (\x y f mr -> mk `fmap` append ( x) y f mr g) 
+                (\x -> mk `fmap` modi MUnlink ( x) g) 
+                (\x -> mk `fmap` modi MBuild ( x) g) 
                 (second (fmap mk) `fmap` step' g) 
                 
 
