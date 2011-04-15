@@ -1,11 +1,15 @@
 {-# LANGUAGE StandaloneDeriving, NoMonomorphismRestriction, ViewPatterns #-}
-import Dependency.Graph (Graph (..), Status (..), Operation , ChangeGraph, IndexError (..))
+import Dependency.Graph (Graph (..), Status (..), Operation , IndexError (..))
 import qualified Dependency.Graph as G
 import Control.Monad
 import Control.Arrow
 import Control.Applicative
 import Data.List hiding (delete)
 import Test.HUnit
+
+
+
+type ChangeGraph a b = Either IndexError (Graph a b)
 
 crashOnLeft :: Show a => Either a b -> b
 crashOnLeft = either (error . show) id
@@ -18,10 +22,10 @@ create :: a -> (a -> Bool) -> Maybe a -> Graph a a -> ChangeGraph a a
 create x fx mx (Accept t) = G.create t x x fx mx 
 
 erase ::  b -> Graph a b -> ChangeGraph a b
-erase x (Accept t) = G.erase t x
+erase x (Accept t) = Right $ G.erase t x
 
 touch ::  b -> Graph a b -> ChangeGraph a b
-touch x (Accept t) = G.touch t x
+touch x (Accept t) = Right $ G.touch t x
 
 matchError ::  t -> Either t1 t2 -> Bool
 matchError i x = case x of
