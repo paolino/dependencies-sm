@@ -1,6 +1,8 @@
 {-# LANGUAGE ViewPatterns, DeriveDataTypeable #-}
 
-module Dependency.Graph ( Status (Unlink, Build)
+module Dependency.Graph 
+{-
+  ( Status (Unlink, Build)
   , Create
   , create
   , Erase
@@ -13,14 +15,17 @@ module Dependency.Graph ( Status (Unlink, Build)
   , mkGraph
   , IndexError (..)
   , Done (..)
-  )where
+  )-}
+  where
 import Data.Map (Map, (!), empty, adjust, member, insert, delete, findWithDefault, lookup, null, filter, findMin, toList)
+import qualified Data.Set as S
 import Control.Monad (when, foldM, (<=<),(>=>))
 import Prelude hiding (lookup, null, filter)
 import Data.List ((\\), break, nub)
-import Control.Arrow (second) 
+import Control.Arrow (second, (***)) 
 import Debug.Trace
 import Data.Typeable
+import Dependency.Lib
 
 data Node a b = Node 
   { value :: a
@@ -76,13 +81,12 @@ data IndexError = Cycle | Duplicate | Unbelonging | BelongingToNotUptodate | Mis
 modi :: Ord b => Modi -> b -> Graph' a b -> Either IndexError (Graph' a b)
 
 modi MUnlink x g = lookupE x g >>= f where
-  f (Unlink _) = error "Dependency.Graph: the impossible happened, sorry" -- stop the world
-  f (Build _) = Left Cycle
+  f (Unlink _) = Right g 
   f z = flood x $ adjust (Unlink . status) ( x) g -- mark as unlink and go further
 
 modi MBuild x g = lookupE x g >>= f where
-  f (Unlink _) = Left Cycle 
-  f (Build _) = Left Cycle
+  f (Unlink _) = Right g
+  f (Build _) = Right g
   f z = flood x $  adjust (Build . status) ( x) g
 
 --
@@ -108,15 +112,16 @@ append x y fx mx  g =  do
         g''' = case mx of
           Nothing -> g''
           Just z -> fmap (\n -> if (index . value $ n) == z then (nub . (x:)) `fmapExistence` n else n) `fmap` g''
-  modi MBuild x g'''
+        t = cycleDetect $ map (id *** (\n -> S.fromList $ (logic . status) n ++ (existence . status) n)) $ toList g'''
+  if t then Left Cycle else modi MBuild x g'''
 
 -- remove a node marked as Unlink
-remove :: Ord b => b -> VGraph' a b -> Either IndexError (VGraph' a b)
+remove :: Ord b => b -> VGraph' a b -> VGraph' a b
 remove x g =  let g' = fmap (fmapExistence (\\[x]) . fmapLogic (\\[x])) `fmap` g
               in case x `lookup` g' of
-                Nothing -> Left MissingKey
-                Just (Unlink _) -> Right $ x `delete` g'
-                Just _ -> Left RemovingAGoodIndex
+                Nothing -> error "Dependency.Graph: missing key"
+                Just (Unlink _) -> x `delete` g'
+                Just _ -> error "Dependency.Graph: removing an unmarked node"
 
 
 type ChangeGraph a b =  Either IndexError (Graph a b)
@@ -138,36 +143,42 @@ type Touch a b
             = b  -- ^ index to be touched
             -> ChangeGraph a b 
 
--- | next programmed operation along the updated manager considering the yielded value
-type Step a b = Either Done (Status a, ChangeGraph a b)
   
 -- | Abstract Graph object. A bunch of closures over the internal structure.
-data Graph a b = Graph 
+data Operation a b = Operation 
   { create  :: Create a b -- ^ insert a new node 
   , erase  :: Erase a b -- ^ delete a node
   , touch   :: Touch a b -- ^ touch a node
-  , step    :: Step a b -- ^ step the 'Graph'
   }
 
+data Graph a b = Accept (Operation a b) | Run (Status a,Graph a b) 
 -- | Things are uptodate
-data Done = Done
 
-step' :: Ord b => VGraph' a b -> Either Done (Status a, Either IndexError (VGraph' a b))
-step' g = case filter isUnlink g of
+operations :: Ord b => VGraph' a b -> Operation a b
+operations g = Operation 
+  (\x y fx mx -> step `fmap` append ( x) y fx mx g)
+  (\x -> step `fmap` modi MUnlink ( x) g) 
+  (\x -> step `fmap` modi MBuild ( x) g) 
+
+step :: Ord b => VGraph' a b -> Graph a b
+step g = case filter isUnlink g of
   g' -> if null g'  then 
           case filter k g of
-            g' -> if null g' then Left Done 
+            g' -> if null g' then Accept $ operations g
                   else 
                     let (_,x) = findMin g' 
-                    in Right ((core . value) `fmap` x, Right $ adjust (Uptodate . status) (index . value . status $ x) g)
+                    in Run ((core . value) `fmap` x, step $ adjust (Uptodate . status) (index . value . status $ x) g)
         else 
           let (_,x) = findMin g' 
-          in Right ((core . value) `fmap` x ,remove (index . value . status $ x) g)
+          in Run ((core . value) `fmap` x , step $ remove (index . value . status $ x) g)
   where
   k n@(Build x) = all (isUptodate . snd) . toList . filter ((depends . value  $ x) . index . value . status) $ g 
   k _ = False
 
+mkGraph :: Ord b => Graph a b
+mkGraph = Accept (operations empty)
 
+{-
 
 -- | Builds an empty concrete Graph object
 mkGraph ::  Ord b => Graph a b
@@ -177,4 +188,4 @@ mkGraph = mk empty where
                 (\x -> mk `fmap` modi MBuild ( x) g) 
                 (second (fmap mk) `fmap` step' g) 
                 
-
+-}
