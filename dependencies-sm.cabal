@@ -55,7 +55,8 @@ Library
     binary, 
     containers,
     hiernotify,
-    timers-updatable
+    timers-updatable,
+    mtl
   -- Modules not exported by this package.
   Other-modules: 
   
@@ -68,4 +69,5 @@ Executable test-dependencies-sm
     base <5,
     binary, 
     containers,
-    HUnit
+    HUnit,
+    mtl

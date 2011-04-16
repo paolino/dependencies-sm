@@ -1,78 +1,77 @@
 {-# LANGUAGE ViewPatterns, DeriveDataTypeable #-}
 
 module Dependency.Graph 
-{-
-  ( Status (Unlink, Build)
+  ( Request (Unlink, Build)
   , Create
   , create
   , Erase
   , erase
   , Touch
   , touch
-  , Step
-  , step 
-  , Graph
+  , Graph (..)
+  , Operation
   , mkGraph
   , IndexError (..)
-  , Done (..)
-  )-}
+  )
   where
 import Data.Map (Map, (!), empty, adjust, member, insert, delete, findWithDefault, lookup, null, filter, findMin, toList)
-import qualified Data.Set as S
+import qualified Data.Set as S (fromList)
 import Control.Monad (when, foldM, (<=<),(>=>))
 import Prelude hiding (lookup, null, filter)
 import Data.List ((\\), break, nub)
 import Control.Arrow (second, (***)) 
-import Debug.Trace
-import Data.Typeable
-import Dependency.Lib
+import Data.Typeable (Typeable) 
+import Dependency.Lib (cycleDetect)
 
+-- a node surround a core value with links to logic dependants and existential dependants
 data Node a b = Node 
   { value :: a
   , logic :: [b]
   , existence :: [b]
   }
 
+-- modify logic dependants
 fmapLogic :: ([b] -> [b]) -> Node a b -> Node a b
 f `fmapLogic` Node x ls es = Node x (f ls) es
 
+-- modify existential dependants
 fmapExistence :: ([b] -> [b]) -> Node a b -> Node a b
 f `fmapExistence` Node x ls es = Node x ls $ f es
 
-data Status a 
-  = Uptodate {status :: a}
-  | Build {status :: a}
-  | Unlink {status :: a} deriving (Show,Eq)
+-- | Possible requests for a resource
+data Request a 
+  = Uptodate {status :: a} -- no request
+  | Build {status :: a} -- ^ the resource must be built
+  | Unlink {status :: a} deriving (Show,Eq) -- ^ the resource must be deleted
 
+-- check for unlink request
 isUnlink (Unlink _) = True
 isUnlink _ = False
 
+-- check for uptodate status
 isUptodate (Uptodate x) = True
 isUptodate _ = False
 
 
-instance Functor Status where
+instance Functor Request where
   f `fmap` s = s{status = f $ status s}
 
-type Graph' a b = Map b (Status (Node a b))
-
---
--- marking routine
-
+-- indexed nodes, tagged with their status/request 
+type Graph' a b = Map b (Request (Node a b))
 
 -- marker type
 data Modi = MBuild | MUnlink
 
+-- crashing lookup. it's used for internal operation and should never happen
 lookupE x g = maybe (error "Dependency.Graph: index not found") id $ x `lookup` g 
 
+-- launches marking from a node to its dependants, folding on the graph
 flood :: Ord b => b -> Graph' a b -> Graph' a b
 flood x g = let g' = ff (modi MUnlink) ( (existence . status) $ x `lookupE` g) g
   in ff (modi MBuild) ( (logic . status) $ x `lookupE` g') g'
   where ff = flip . foldr 
         
-
-data IndexError = Cycle | Duplicate | Unbelonging | Missing deriving (Show,Eq,Typeable)
-
+-- change the request/status of a node or stop if already marked and flood the dependants
 modi :: Ord b => Modi -> b -> Graph' a b -> Graph' a b
 
 modi MUnlink x g = case x `lookupE` g of
@@ -84,8 +83,7 @@ modi MBuild x g = case x `lookupE` g of
   (Build _) -> g
   z -> flood x $  adjust (Build . status) x g
 
---
-
+-- specific value for the nodes, it contains client specified values
 data Value a b = Value
   { core :: a
   , index :: b
@@ -93,9 +91,17 @@ data Value a b = Value
   , belongs :: Maybe b
   }
 
+-- more specific graph
 type VGraph' a b = Graph' (Value a b) b
 
--- cons a new node and touch it
+-- | Errors that can happen when using indices to refer to resources
+data IndexError   = Cycle           -- ^ trying to 'create' a resource causes a cycle following depandants
+                  | Duplicate       -- ^ trying to 'create' a resource with an already present index
+                  | Unbelonging     -- ^ trying to 'create' a resource with an existential link to a non existing index
+                  | Missing         -- ^ trying to 'touch' or 'erase' a resource giving a non existing index
+                  deriving (Show,Eq,Typeable)
+
+-- cons a new node, detect cycle or touch it
 append :: Ord b => b -> a -> (b -> Bool) -> Maybe b -> VGraph' a b -> Either IndexError (VGraph' a b)
 append x y fx mx  g =  do
   when (x `member` g) $ Left  Duplicate
@@ -109,7 +115,7 @@ append x y fx mx  g =  do
         t = cycleDetect $ map (id *** (\n -> S.fromList $ (logic . status) n ++ (existence . status) n)) $ toList g'''
   if t then Left Cycle else Right $ modi MBuild x g'''
 
--- remove a node marked as Unlink
+-- remove a node marked as 'Unlink'. It crashes if the node was not requested to
 remove :: Ord b => b -> VGraph' a b -> VGraph' a b
 remove x g =  let g' = fmap (fmapExistence (\\[x]) . fmapLogic (\\[x])) `fmap` g
               in case x `lookupE` g' of
@@ -133,22 +139,27 @@ type Touch a b
             -> Either IndexError (Graph a b)
 
   
--- | Abstract Graph object. A bunch of closures over the internal structure.
+-- | Valid operations when a 'Graph' is in Accept state.
 data Operation a b = Operation 
-  { create  :: Create a b -- ^ insert a new node 
-  , erase   :: Erase a b -- ^ delete a node
-  , touch   :: Touch a b -- ^ touch a node
+  { create  :: Create a b -- ^ insert a new resource
+  , erase   :: Erase a b -- ^ erase a resource
+  , touch   :: Touch a b -- ^ touch a resource
   }
 
-data Graph a b = Accept (Operation a b) | Run (Status a,Graph a b) 
--- | Things are uptodate
+-- | A 'Graph' is a 2 state machine. 
+-- When in Accept state any of the 3 operations can be performed. 
+-- When in Run state a resource is presented in a request, along with the consequent Graph
+--
+data Graph a b = Accept (Operation a b) | Run (Request a,Graph a b) 
 
+-- closes a set of operations on the actual graph
 operations :: Ord b => VGraph' a b -> Operation a b
 operations g = Operation 
   (\x y fx mx -> step `fmap` append ( x) y fx mx g)
   (\x -> if x `member` g then Right . step $ modi MUnlink ( x) g else Left Missing) 
   (\x -> if x `member` g then Right . step $ modi MBuild ( x) g else Left Missing) 
 
+-- create next Run state given the actual graph. It falls in accept state if everything is uptodate
 step :: Ord b => VGraph' a b -> Graph a b
 step g = case filter isUnlink g of
   g' -> if null g'  then 
@@ -164,17 +175,8 @@ step g = case filter isUnlink g of
   k n@(Build x) = all (isUptodate . snd) . toList . filter ((depends . value  $ x) . index . value . status) $ g 
   k _ = False
 
+-- | Create a fresh 'Graph' in 'Accept' state. The graph has no resources indexed.
 mkGraph :: Ord b => Graph a b
 mkGraph = Accept $ operations empty
 
-{-
 
--- | Builds an empty concrete Graph object
-mkGraph ::  Ord b => Graph a b
-mkGraph = mk empty where
-  mk g = Graph  (\x y f mr -> mk `fmap` append ( x) y f mr g) 
-                (\x -> mk `fmap` modi MUnlink ( x) g) 
-                (\x -> mk `fmap` modi MBuild ( x) g) 
-                (second (fmap mk) `fmap` step' g) 
-                
--}

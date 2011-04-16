@@ -1,5 +1,5 @@
 {-# LANGUAGE StandaloneDeriving, NoMonomorphismRestriction, ViewPatterns #-}
-import Dependency.Graph (Graph (..), Status (..), Operation , IndexError (..))
+import Dependency.Graph (Graph (..), Request (..), Operation , IndexError (..))
 import qualified Dependency.Graph as G
 import Control.Monad
 import Control.Arrow
@@ -14,7 +14,7 @@ type ChangeGraph a b = Either IndexError (Graph a b)
 crashOnLeft :: Show a => Either a b -> b
 crashOnLeft = either (error . show) id
 
-drawn :: Graph a b -> ([Status a],Graph a b)
+drawn :: Graph a b -> ([Request a],Graph a b)
 drawn g@(Accept _) = ([],g)
 drawn (Run (x,g)) = first (x:) $ drawn g
 
@@ -22,10 +22,10 @@ create :: a -> (a -> Bool) -> Maybe a -> Graph a a -> ChangeGraph a a
 create x fx mx (Accept t) = G.create t x x fx mx 
 
 erase ::  b -> Graph a b -> ChangeGraph a b
-erase x (Accept t) = Right $ G.erase t x
+erase x (Accept t) =  G.erase t x
 
 touch ::  b -> Graph a b -> ChangeGraph a b
-touch x (Accept t) = Right $ G.touch t x
+touch x (Accept t) = G.touch t x
 
 matchError ::  t -> Either t1 t2 -> Bool
 matchError i x = case x of
@@ -41,10 +41,10 @@ anyone = const True
 eq ::  Eq a => a -> a -> Bool
 eq = (==)
 
-multiDrawn :: Ord b => [Graph a b -> ChangeGraph a b] -> Either IndexError ([[Status a]], Graph a b)
+multiDrawn :: Ord b => [Graph a b -> ChangeGraph a b] -> Either IndexError ([[Request a]], Graph a b)
 multiDrawn = foldM (\(ys,g) f -> first (\y -> ys ++[y]) . drawn <$> f g ) ([], G.mkGraph)
 
-testDrawn :: (Show a , Eq a, Ord b) => String -> [(Graph a b -> ChangeGraph a b, [Status a])] ->  Assertion
+testDrawn :: (Show a , Eq a, Ord b) => String -> [(Graph a b -> ChangeGraph a b, [Request a])] ->  Assertion
 testDrawn s (unzip -> (fs,xs)) = assertEqual s xs . fst $ crashOnLeft $ multiDrawn fs
 
 testError :: Ord b => String -> t -> ChangeGraph a b ->  Assertion
@@ -100,7 +100,7 @@ t16 =  testDrawn "multi, existential " [Unlink 1, Unlink 2] $
 t17 =  testError "multi, existential, belonging to a not ready node" BelongingToNotUptodate $ 
   create 1 noone Nothing >=> create 2 noone (Just 1)
 
-ts = TestList $ map TestCase [t0,t1,t2,t3,t4,t5,t6,t6,t7,t8,t9,t10,t11,t12,t13,t14,t15,t16,t17]
+-}
+ts = TestList $ map TestCase [t1,t1a,t2,t3,t4,t18]
 
 main = runTestTT ts
--}
