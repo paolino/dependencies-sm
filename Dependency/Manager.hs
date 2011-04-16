@@ -56,8 +56,8 @@ mkManager ::  (Ord b , Functor m, Monad m) => Manager m b
 mkManager = let
   execute = fmap (fmap mkManager) . runCompilation
   insertItem' (Accept g) x = either (return . Left) execute (create g (iindex x) x (depmask x) Nothing)
-  deleteItem' (Accept g) x = execute $ erase g x
-  touchItem' (Accept g) x = execute $ touch g x
+  deleteItem' (Accept g) x = either (return . Left) execute $ erase g x
+  touchItem' (Accept g) x = either (return . Left) execute $ touch g x
   mkManager g = Manager (insertItem' g) (deleteItem' g) (touchItem' g) 
   in mkManager mkGraph
 

@@ -71,7 +71,7 @@ flood x g = let g' = ff (modi MUnlink) ( (existence . status) $ x `lookupE` g) g
   where ff = flip . foldr 
         
 
-data IndexError = Cycle | Duplicate | Unbelonging deriving (Show,Eq,Typeable)
+data IndexError = Cycle | Duplicate | Unbelonging | Missing deriving (Show,Eq,Typeable)
 
 modi :: Ord b => Modi -> b -> Graph' a b -> Graph' a b
 
@@ -126,11 +126,11 @@ type Create  a b
 -- | All items indexed as the argument and all existential dependants will be marked to yield an Unlink 
 type Erase a b
             = b  -- ^ index to be deleted
-            -> Graph a b 
+            -> Either IndexError (Graph a b)
 -- | All items indexed as the argument and their logical dependants will be marked to yield a Build. All items existentially depending on the touched items will be marked as Unlink
 type Touch a b
             = b  -- ^ index to be touched
-            -> Graph a b 
+            -> Either IndexError (Graph a b)
 
   
 -- | Abstract Graph object. A bunch of closures over the internal structure.
@@ -146,8 +146,8 @@ data Graph a b = Accept (Operation a b) | Run (Status a,Graph a b)
 operations :: Ord b => VGraph' a b -> Operation a b
 operations g = Operation 
   (\x y fx mx -> step `fmap` append ( x) y fx mx g)
-  (\x -> step $ modi MUnlink ( x) g) 
-  (\x -> step $ modi MBuild ( x) g) 
+  (\x -> if x `member` g then Right . step $ modi MUnlink ( x) g else Left Missing) 
+  (\x -> if x `member` g then Right . step $ modi MBuild ( x) g else Left Missing) 
 
 step :: Ord b => VGraph' a b -> Graph a b
 step g = case filter isUnlink g of
