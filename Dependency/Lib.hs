@@ -1,3 +1,5 @@
+-- | Useful generic stuff
+
 module Dependency.Lib (cycleDetect) where
 
 import Data.Set (Set,member,union,fromList)

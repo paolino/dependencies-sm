@@ -1,14 +1,37 @@
--- | High level interface to the 'Dependency.Graph'. Clients should be able to rewrite each possible compiling action in an 'Item'.
+-- | A possible high level interface to the "Dependency.Graph", 
+-- freely taken from /Hakyll/ dependency framework (<http://hackage.haskell.org/package/hakyll>).
+-- 
+-- Here we force the client to a model: the 'Item'. This model has everything is necessary to use the "Dependency.Graph" framework. 
+--
+-- An 'Item' is a resource for the graph and it contains also its 'index', that must be unique. 
+--
+-- It contains also the reactions to 'Build' and 'Unlink', with a peculiarity: the reaction to 'Build' can produce more items. 
+-- Incidentally this items are existentially depending on the item that created them by that reaction. 
+-- And more, there is no other way to produce this type of dependency link.
+--
+-- This peculiarity is known in *Hakyll* as meta compiling. A compiling action produce new compilers. A runtime feature. 
+--
+-- Last field of an 'Item' is a dependency mask ('depmask') which is exactly the way to express locic dependencies in a 'Graph' (see 'create')
+--
+-- The 'Manager' interface also hide one state of a 'Graph'. The 'Present' state is always automatically stepped until the next 'Accept' state,
+-- as both 'Build' and 'Unlink' are resolved by the manager by the item itself running 'build' and 'unlink' actions.  
+--
+-- The 'Accept' state is projected in 'insertItem', 'deleteItem' , 'touchItem'.
+
+
 module Dependency.Manager 
-  ( Item (..)
-  , IndexError (..)
-  , Result
-  , Manager
-  , insertItem
-  , deleteItem
-  , touchItem
+  ( 
+  -- * Interfacing to the module
+    Item (..)
+  -- * Operational elements
+  , Manager (..)
   , mkManager
+  -- * Shortcut types
+  , Result
+  -- * From "Dependency.Graph"
+  , IndexError (..)
   )  where
+
 import Control.Applicative ((<$>))
 import Control.Monad.Writer (tell, WriterT, runWriterT, listen, lift, foldM)
 import qualified Dependency.Graph as DG (Graph)
@@ -21,14 +44,14 @@ import Control.Monad.Cont
 data Ord b => Item m b = Item 
   { index :: b            -- ^ an index for the item. It must be unique, or 'Duplicate' will be detected
   , build :: m [Item m b] -- ^ building action which return new 'Item''s, evaluated when this item is to be built
-  , destroy :: m ()       -- ^ destroying action, evaluated when this item is to be deleted
+  , unlink :: m ()        -- ^ destroying action, evaluated when this item is to be deleted
   , depmask :: b -> Bool  -- ^ all indices matching will be logical dependencies for this item. Inaccurate selectors can lead to 'Cycle' error
   }
 
--- | Each manager action can lead to a problem with indices found in IndexError 
+-- | Each manager action can lead to a problem with indices signalled in IndexError 
 type Result m b = m (Either IndexError (Manager m b))
 
--- | Manager object. A manager is hiding the internal dependency structure. 4 methods can make it evolve.
+-- | A manager is what's to be held. Its fields are making it evolve. 
 data Manager m b = Manager 
   { insertItem :: Item m b -> Result m b -- ^ insert new items in the manager
   , deleteItem :: b -> Result m b -- ^ schedule deletion of items by index
@@ -43,8 +66,8 @@ type Collecting m b = WriterT [(b,Item m b)] m
 
 -- compile until graph goes in accept mode. New items with their keys are collected by telling
 compile :: (Ord b, Functor m, Monad m) => Graph m b -> Collecting m b (Graph m b)
-compile (Run (y,ng)) = case y of
-  Unlink x -> lift (destroy x) >> compile ng
+compile (Present (y,ng)) = case y of
+  Unlink x -> lift (unlink x) >> compile ng
   Build x -> do
     is <- lift $ build x
     tell $ zip (repeat $ index x) is
@@ -55,7 +78,7 @@ compile g = return g
 type ErrorGraph m b = Either IndexError (Graph m b)
 
 -- core of the folding of recursive compiling the new itemes collected on builds. 
--- It crashes on Run state of the graph, which must be handled by compile
+-- It crashes on Present state of the graph, which must be handled by compile
 --
 amend :: Ord b => Graph m b -> (b, Item m b) -> ErrorGraph m b
 amend (Accept g) (j,i) = create g (index i) i (depmask i) (Just j) 
@@ -78,7 +101,7 @@ runCompilation :: (Ord b, Functor m, Monad m) => Graph m b -> m (ErrorGraph m b)
 runCompilation g = fmap fst . runWriterT . flip runContT return $ callCC $ \k -> Right <$> compileRecursive (k . Left) g
                           
 
--- | Create a fresh manager, with no items controlled
+-- | Create a fresh manager, with no items controlled.
 mkManager ::  (Ord b , Functor m, Monad m) => Manager m b
 mkManager = let
   execute = fmap (fmap mkManager) . runCompilation

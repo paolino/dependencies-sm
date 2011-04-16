@@ -16,7 +16,7 @@ crashOnLeft = either (error . show) id
 
 drawn :: Graph a b -> ([Request a],Graph a b)
 drawn g@(Accept _) = ([],g)
-drawn (Run (x,g)) = first (x:) $ drawn g
+drawn (Present (x,g)) = first (x:) $ drawn g
 
 create :: a -> (a -> Bool) -> Maybe a -> Graph a a -> ChangeGraph a a
 create x fx mx (Accept t) = G.create t x x fx mx 
