@@ -1,5 +1,5 @@
 {-# LANGUAGE ViewPatterns, DeriveDataTypeable #-}
--- | Low level module. The structure exported here is a 2 step machine: 'Graph' a b. 
+-- | Low level module. The structure exported from this module is a 2-step circular machine: 'Graph' a b. 
 --
 -- Its type arguments are:
 --
