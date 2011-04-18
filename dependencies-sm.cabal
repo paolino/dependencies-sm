@@ -48,7 +48,7 @@ Cabal-version:       >=1.2
 
 Library
   -- Modules exported by the library.
-  Exposed-modules: Dependency.Manager, Dependency.Graph, Dependency.Lib
+  Exposed-modules: Dependency.Manager, Dependency.Graph, Dependency.Lib, Data.List.Difference
   -- Packages needed in order to build this package.
   Build-depends:       
     base <5,
@@ -61,7 +61,6 @@ Executable console-notifier-dependencies-sm
     base <5,
     process,
     filepath,
-    hiernotify,
     timers-updatable
 
 Executable test-dependencies-sm

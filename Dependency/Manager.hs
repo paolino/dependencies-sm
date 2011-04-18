@@ -13,10 +13,6 @@
 --
 -- Last field of an 'Item' is a dependency mask ('depmask') which is exactly the way to express locic dependencies in a 'Graph' (see 'create')
 --
--- The 'Manager' interface also hide one state of a 'Graph'. The 'Present' state is always automatically stepped until the next 'Accept' state,
--- as both 'Build' and 'Unlink' are resolved by the manager by the item itself running 'build' and 'unlink' actions.  
---
--- The 'Accept' state is projected in 'insertItem', 'deleteItem' , 'touchItem'.
 
 
 module Dependency.Manager 
@@ -24,18 +20,21 @@ module Dependency.Manager
   -- * Interfacing to the module
     Item (..)
   -- * Operational elements
-  , Manager (..)
+  , Manager 
+  , update
   , mkManager
-  -- * Shortcut types
-  , Result
   -- * From "Dependency.Graph"
   , IndexError (..)
+  -- * From "Data.List.Difference"
+  , Difference (..)
   )  where
 
 import Control.Applicative ((<$>))
 import Control.Monad.Writer (tell, WriterT, runWriterT, listen, lift, foldM)
+import Data.List.Difference (Difference (..))
 import qualified Dependency.Graph as DG (Graph)
 import Dependency.Graph  hiding (Graph)
+
 
 import Control.Monad.Cont
 
@@ -48,14 +47,14 @@ data Ord b => Item m b = Item
   , depmask :: b -> Bool  -- ^ all indices matching will be logical dependencies for this item. Inaccurate selectors can lead to 'Cycle' error
   }
 
--- | Each manager action can lead to a problem with indices signalled in IndexError 
-type Result m b = m (Either IndexError (Manager m b))
+-- Each manager action can lead to a problem with indices signalled in IndexError 
+type Result m b = m (Either IndexError (Core m b))
 
--- | A manager is what's to be held. Its fields are making it evolve. 
-data Manager m b = Manager 
-  { insertItem :: Item m b -> Result m b -- ^ insert new items in the manager
-  , deleteItem :: b -> Result m b -- ^ schedule deletion of items by index
-  , touchItem :: b -> Result m b -- ^ schedule touch of items of index
+-- A manager is what's to be held to track dependencies
+data Core m b = Core 
+  { insertItem :: Item m b -> Result m b --  insert new items in the manager
+  , deleteItem :: b -> Result m b --  schedule deletion of items by index
+  , touchItem :: b -> Result m b --  schedule touch of items of index
   }
 
 -- the real graph where values are items
@@ -101,13 +100,31 @@ runCompilation :: (Ord b, Functor m, Monad m) => Graph m b -> m (ErrorGraph m b)
 runCompilation g = fmap fst . runWriterT . flip runContT return $ callCC $ \k -> Right <$> compileRecursive (k . Left) g
                           
 
--- | Create a fresh manager, with no items controlled.
-mkManager ::  (Ord b , Functor m, Monad m) => Manager m b
-mkManager = let
-  execute = fmap (fmap mkManager) . runCompilation
-  insertItem' (Accept g) x = either (return . Left) execute (create g (index x) x (depmask x) Nothing)
-  deleteItem' (Accept g) x = either (return . Left) execute $ erase g x
-  touchItem' (Accept g) x = either (return . Left) execute $ touch g x
-  mkManager g = Manager (insertItem' g) (deleteItem' g) (touchItem' g) 
-  in mkManager mkGraph
+--  Create a fresh manager, with no items controlled.
+mkCore ::  (Ord b , Functor m, Monad m) => Core m b
+mkCore = let
+  execute = fmap (fmap mkCore) . runCompilation
+  insertItem' (Accept g) x = eitherExecute $ create g (index x) x (depmask x) Nothing
+  deleteItem' (Accept g) x = eitherExecute $ erase g x
+  touchItem' (Accept g) x = eitherExecute $ touch g x
+  mkCore g = Core (insertItem' g) (deleteItem' g) (touchItem' g) 
+  eitherExecute = either (return . Left) execute
+  in mkCore mkGraph
+
+
+-- | A stepping manager for 'Item's.
+newtype Manager m b =  Manager {
+  update ::  Difference b -> m (Either IndexError (Manager m b)) -- ^ updates the manager from a 'Difference' on indices
+  }
+
+-- | Build a 'Manager' given an 'Item' creator.
+mkManager ::  (Ord b, Functor m, Monad m) => (b -> Item m b) -> Manager m b
+mkManager mkItem = let  
+        update t (Difference ns ds ts) = flip runContT return  $ callCC $ \k -> Right <$> do
+              let folder f t n = lift (f t n) >>= either (k . Left) return
+              t' <- foldM (folder insertItem) t $ map mkItem ns
+              t'' <- foldM (folder deleteItem) t' ds
+              Manager . update <$> foldM (folder touchItem) t'' ts
+        in Manager (update mkCore)
+
 
