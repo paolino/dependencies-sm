@@ -4,6 +4,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE Rank2Types #-}
 module Compiler.Resource (
+    FromTo (..),
     Resources (..),
     inFiles,
     inMemory
