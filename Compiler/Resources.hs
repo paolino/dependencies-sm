@@ -1,12 +1,12 @@
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE ScopedTypeVariables, Rank2Types #-}
+-- | Abstract 'Resources' definition and some implementations. 'Resources' value are monadic resource managers, with classic methods, 'update'
+-- 'select' and 'delete'. Resurces are indexed by unique indices.
 module Compiler.Resources (
+    -- * Operations
     Resources (..),
---    inFiles,
-    inMemory
+    -- * Builders
+    inFiles,
+    inMemory,
     )
     where
 
@@ -18,13 +18,14 @@ import System.FilePath ((</>))
 import System.Directory (removeFile)
 import Data.Bijection (Bijection (..))
 
--- | Resource management. Resource resources are stored and retrived from here.
+-- | Resource management. Type \'b\' is the index type, type \'k'\ is the serialization type.
 data Resources m k b = Resources
   { update :: forall a . Bijection a k => b -> a -> m ()           -- ^ set a value for the index
   , select :: forall a . Bijection a k => (b -> Bool) -> m [(b,a)] -- ^ get a list of index and value where indices match the condition
-  , delete :: b -> IO ()                       -- ^ forget the given index 
+  , delete :: b -> m ()                       -- ^ forget the given index 
   }
 
+-- | In memory resource management
 inMemory :: forall k b . Eq b => IO (Resources IO k b)
 inMemory = do
   t <- newTVarIO [] 
@@ -37,11 +38,12 @@ inMemory = do
       (\f ->  atomically $ select' f <$> readTVar t ) 
       (\x -> atomically $ delete' x  <$> readTVar t >>=  writeTVar t)
    
+-- | Filesystem persistent synchronous resource management
 inFiles :: forall b k . (Eq b , Hashable b) 
-  => (FilePath -> IO k)
+  => (FilePath -> IO k)       -- ^ read file action for the serialization type
   -> (FilePath -> k -> IO ()) 
   -> FilePath 
-  -> IO (Resources k b)
+  -> IO (Resources IO k b)
 inFiles readFile writeFile p  = do
   hashes <- inMemory :: IO (Resources IO FilePath b)
   let

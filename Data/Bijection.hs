@@ -1,18 +1,13 @@
-{-# LANGUAGE MultiParamTypeClasses, FlexibleInstances, TypeSynonymInstances, OverlappingInstances #-}
-module Data.Bijection where
+-- | A typeclass and instances to project a type back and forth to another one
 
-import Data.Binary (Binary, encode, decode)
-import Data.ByteString.Lazy (ByteString)
+{-# LANGUAGE MultiParamTypeClasses, FlexibleInstances #-}
+module Data.Bijection (Bijection (..)) where
 
+-- | The Bijection class
 class Bijection a b where
-  from :: b -> a
-  to :: a -> b
+  from :: b -> a  -- ^ back from b to a
+  to :: a -> b  -- ^ forth from a to b
 
 instance Bijection a a where
   from = id
   to = id
-
-
-instance Binary a => Bijection a ByteString where  
-  from = decode
-  to = encode

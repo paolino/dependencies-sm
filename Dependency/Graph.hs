@@ -50,13 +50,12 @@ module Dependency.Graph
   )
   where
 import Data.Map (Map, (!), empty, adjust, member, insert, delete, findWithDefault, lookup, null, filter, findMin, toList)
-import qualified Data.Set as S (fromList)
+import qualified Data.Set as S (fromList,Set,union,member)
 import Control.Monad (when, foldM, (<=<),(>=>))
 import Prelude hiding (lookup, null, filter)
 import Data.List ((\\), break, nub)
 import Control.Arrow (second, (***)) 
 import Data.Typeable (Typeable) 
-import Dependency.Lib (cycleDetect)
 
 -- a node surround a core value with links to logic dependants and existential dependants
 data Node a b = Node 
@@ -221,4 +220,10 @@ step g = case filter isUnlink g of
 mkGraph :: Ord b => Graph a b
 mkGraph = Accept $ operations empty
 
-
+-- detect a cycle in a graph
+cycleDetect :: Ord a
+              => [(a,S.Set a)] -- ^ the graph
+              -> Bool -- ^ True if a cycle was detected
+cycleDetect [] = False
+cycleDetect (xt@(x,xs) :ys) = x `S.member` xs || cycleDetect (map f ys) where
+  f = second $ \xs' -> if x `S.member` xs' then xs' `S.union` xs else xs'
