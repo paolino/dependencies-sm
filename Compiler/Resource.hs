@@ -3,45 +3,29 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE Rank2Types #-}
-module Compiler.Resource (
-    FromTo (..),
+module Compiler.Resources (
     Resources (..),
-    inFiles,
+--    inFiles,
     inMemory
     )
     where
 
-import Prelude hiding (readFile, writeFile)
-import Data.Binary (Binary,encode,decode)
 import Control.Concurrent.STM (newTVarIO, readTVar, writeTVar, atomically)
 import Control.Arrow (second)
 import Control.Applicative ((<$>))
-import Data.ByteString.Lazy (ByteString, writeFile, readFile)
 import Data.Hashable (Hashable, hash)
 import System.FilePath ((</>))
 import System.Directory (removeFile)
-
-
-class FromTo k a where
-  from :: k -> a
-  to :: a -> k
-
-instance Binary a => FromTo ByteString a where
-  from = decode
-  to = encode
-
-instance FromTo a a where
-  from = id
-  to = id
+import Data.Bijection (Bijection (..))
 
 -- | Resource management. Resource resources are stored and retrived from here.
-data Resources k b = Resources
-  { update :: forall a . FromTo k a => b -> a -> IO ()           -- ^ set a value for the index
-  , select :: forall a . FromTo k a => (b -> Bool) -> IO [(b,a)] -- ^ get a list of index and value where indices match the condition
+data Resources m k b = Resources
+  { update :: forall a . Bijection a k => b -> a -> m ()           -- ^ set a value for the index
+  , select :: forall a . Bijection a k => (b -> Bool) -> m [(b,a)] -- ^ get a list of index and value where indices match the condition
   , delete :: b -> IO ()                       -- ^ forget the given index 
   }
 
-inMemory :: forall k b . Eq b => IO (Resources k b)
+inMemory :: forall k b . Eq b => IO (Resources IO k b)
 inMemory = do
   t <- newTVarIO [] 
   let
@@ -53,17 +37,18 @@ inMemory = do
       (\f ->  atomically $ select' f <$> readTVar t ) 
       (\x -> atomically $ delete' x  <$> readTVar t >>=  writeTVar t)
    
-
-inFiles :: forall b . (Eq b , Hashable b) => FilePath -> IO (Resources ByteString b)
-inFiles p  = do
-  hashes <- inMemory :: IO (Resources String b)
+inFiles :: forall b k . (Eq b , Hashable b) 
+  => (FilePath -> IO k)
+  -> (FilePath -> k -> IO ()) 
+  -> FilePath 
+  -> IO (Resources k b)
+inFiles readFile writeFile p  = do
+  hashes <- inMemory :: IO (Resources IO FilePath b)
   let
-    update' :: forall a . FromTo ByteString a => b -> a -> IO ()
     update' x y = do
       let h = show (hash x)
       update hashes x h 
       writeFile (p </> h) $ to y
-    select' :: forall a . FromTo ByteString a => (b -> Bool) -> IO [(b,a)]
     select' f = do
       (xs,hs) <- unzip <$> select hashes f
       rs <- mapM (fmap from . readFile . (p </>)) hs
@@ -73,6 +58,5 @@ inFiles p  = do
       delete hashes x
       removeFile $ p </> h
   return $ Resources update' select' delete'
-
 
 
