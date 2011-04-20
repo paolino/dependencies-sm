@@ -54,7 +54,7 @@ import qualified Data.Set as S (fromList,Set,union,member)
 import Control.Monad (when, foldM, (<=<),(>=>))
 import Prelude hiding (lookup, null, filter)
 import Data.List ((\\), break, nub)
-import Control.Arrow (second, (***)) 
+import Control.Arrow (second, (***), (&&&)) 
 import Data.Typeable (Typeable) 
 
 -- a node surround a core value with links to logic dependants and existential dependants
@@ -191,7 +191,7 @@ data Operation a b = Operation
 --
 data Graph a b 
   = Accept (Operation a b)    -- ^ graph ready to change
-  | Present (Request a,Graph a b) -- ^ graph presenting request to change
+  | Present (Request (b,a),Graph a b) -- ^ graph presenting request to change
 
 -- closes a set of operations on the actual graph
 operations :: Ord b => VGraph' a b -> Operation a b
@@ -208,10 +208,10 @@ step g = case filter isUnlink g of
             g' -> if null g' then Accept $ operations g
                   else 
                     let (_,x) = findMin g' 
-                    in Present ((core . value) `fmap` x, step $ adjust (Uptodate . status) (index . value . status $ x) g)
+                    in Present (((index &&& core) . value) `fmap` x, step $ adjust (Uptodate . status) (index . value . status $ x) g)
         else 
           let (_,x) = findMin g' 
-          in Present ((core . value) `fmap` x , step $ remove (index . value . status $ x) g)
+          in Present (((index &&& core) . value) `fmap` x , step $ remove (index . value . status $ x) g)
   where
   k n@(Build x) = all (isUptodate . snd) . toList . filter ((depends . value  $ x) . index . value . status) $ g 
   k _ = False

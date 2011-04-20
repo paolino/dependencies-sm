@@ -1,12 +1,13 @@
-{-# LANGUAGE ExistentialQuantification, RankNTypes, MonoLocalBinds #-}
+{-# LANGUAGE  MonoLocalBinds #-}
 -- | A specialised 'Manager' for 'Compiler's
 module Compiler.Manager (
-  mkCompilerManager 
+  mkCompilerManager,
   ) where
 
 import Prelude hiding (lookup)
 import Dependency.Manager (Item (..))
 import Control.Applicative ((<$>))
+import Control.Arrow ((&&&))
 
 import Compiler.Interface 
 import Compiler.Resources
@@ -19,15 +20,14 @@ mkItem :: (Monad m , Ord b)
   -> Resources m k b      -- ^ resource manager
   -> b                  -- ^ a new index
   -> Item m b           -- ^ an item for the 'Dependency.Manager.insertItem'
-mkItem cs s x = mkItem' (cs x) where
-  mkItem' (Compiler x co ds) = Item 
-    { index = x
-    , build = let 
+mkItem cs s x = mkItem' (x,cs x) where
+  mkItem' (z,Compiler co ds) = Item 
+    { build = let 
           build' co = case co of
-            Completed (y,cs) -> y >>= update s x >> return (map mkItem' cs)
+            Completed (y,cs) -> y >>= update s z >> return (map (fst &&& mkItem') cs)
             Compile m f  -> select s m >>= f  >>= build'
           in build' co
-    , unlink = delete s x
+    , unlink = delete s z
     , depmask = ds
     }
 

@@ -10,11 +10,10 @@ Name:                dependencies-sm
 Version:             0.1
 
 -- A short (one-line) description of the package.
-Synopsis:            a state machine for dependency analysis and rebuilding
-
+Synopsis:            dependency analisys and recompilation driving 
 -- A longer description of the package.
--- Description:         
-
+Description:         This package propose some abstractions for dependency driven updating. Metacompilations are accepted.
+ 
 -- URL for the project homepage or repository.
 Homepage:            http://github/paolino/dependencies-sm
 
@@ -25,7 +24,7 @@ License:             BSD3
 License-file:        LICENSE
 
 -- The package author(s).
-Author:              Paolo Veronelli, Jasper Van der Jeugt
+Author:              Paolo Veronelli
 
 -- An email address to which users can send suggestions, bug reports,
 -- and patches.

@@ -16,7 +16,7 @@ import Data.Binary (Binary)
 data Steps m k b 
   -- | Last compilation step, containing the new resource, and a set of new compilers.
   = forall a. Bijection a k => Completed 
-      { completed :: (m a,[Compiler m k b])
+      { completed :: (m a,[(b,Compiler m k b)])
       }
   -- | Compile step. Dependency resources are expected with their index to produce next step.
   | forall a. Bijection a k => Compile 
@@ -29,8 +29,7 @@ data Steps m k b
 --
 --
 data Compiler m k b = Compiler
-  { target :: b                   -- ^ index of the compiler
-  , steps :: Steps m k b              -- ^ steps to make the compilation
+  { steps :: Steps m k b              -- ^ steps to make the compilation
   , dependencies :: b -> Bool     -- ^ all dependencies that will be asked during compilation
   }
 

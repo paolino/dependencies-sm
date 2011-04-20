@@ -30,6 +30,7 @@ module Dependency.Manager
   )  where
 
 import Control.Applicative ((<$>))
+import Control.Arrow ((&&&))
 import Control.Monad.Writer (tell, WriterT, runWriterT, listen, lift, foldM)
 import Data.List.Difference (Difference (..))
 import qualified Dependency.Graph as DG (Graph)
@@ -38,11 +39,10 @@ import Dependency.Graph  hiding (Graph)
 
 import Control.Monad.Cont
 
--- | Item values must be supplied by the clients. They index resources and provide build and destroy actions for them. 
+-- | Item values must be supplied by the clients. They provide build and destroy actions for them. 
 -- Their dependencies are expressed with a matching function on indices. Clients can choose monad and index type.
 data Ord b => Item m b = Item 
-  { index :: b            -- ^ an index for the item. It must be unique, or 'Duplicate' will be detected
-  , build :: m [Item m b] -- ^ building action which return new 'Item''s, evaluated when this item is to be built
+  { build :: m [(b,Item m b)] -- ^ building action which return new 'Item''s, evaluated when this item is to be built
   , unlink :: m ()        -- ^ destroying action, evaluated when this item is to be deleted
   , depmask :: b -> Bool  -- ^ all indices matching will be logical dependencies for this item. Inaccurate selectors can lead to 'Cycle' error
   }
@@ -52,7 +52,7 @@ type Result m b = m (Either IndexError (Core m b))
 
 -- A manager is what's to be held to track dependencies
 data Core m b = Core 
-  { insertItem :: Item m b -> Result m b --  insert new items in the manager
+  { insertItem :: b -> Item m b -> Result m b --  insert new items in the manager
   , deleteItem :: b -> Result m b --  schedule deletion of items by index
   , touchItem :: b -> Result m b --  schedule touch of items of index
   }
@@ -61,15 +61,15 @@ data Core m b = Core
 type Graph m b = DG.Graph (Item m b) b
 
 -- helped by Writer monad to collect new items from build actions
-type Collecting m b = WriterT [(b,Item m b)] m 
+type Collecting m b = WriterT [(b,(b,Item m b))] m 
 
 -- compile until graph goes in accept mode. New items with their keys are collected by telling
 compile :: (Ord b, Functor m, Monad m) => Graph m b -> Collecting m b (Graph m b)
 compile (Present (y,ng)) = case y of
-  Unlink x -> lift (unlink x) >> compile ng
-  Build x -> do
+  Unlink (_,x) -> lift (unlink x) >> compile ng
+  Build (i,x) -> do
     is <- lift $ build x
-    tell $ zip (repeat $ index x) is
+    tell $ zip (repeat i) is
     compile ng
 compile g = return g
 
@@ -79,8 +79,8 @@ type ErrorGraph m b = Either IndexError (Graph m b)
 -- core of the folding of recursive compiling the new itemes collected on builds. 
 -- It crashes on Present state of the graph, which must be handled by compile
 --
-amend :: Ord b => Graph m b -> (b, Item m b) -> ErrorGraph m b
-amend (Accept g) (j,i) = create g (index i) i (depmask i) (Just j) 
+amend :: Ord b => Graph m b -> (b, (b,Item m b)) -> ErrorGraph m b
+amend (Accept g) (j,(y,i)) = create g y i (depmask i) (Just j) 
 amend _ _ = error "Dependency.Manager: compiling was not completed"
 
 -- add a ContT monad layer to come out straight of recursion. The result of the computation is already forced to ErrorGraph. 
@@ -104,7 +104,7 @@ runCompilation g = fmap fst . runWriterT . flip runContT return $ callCC $ \k ->
 mkCore ::  (Ord b , Functor m, Monad m) => Core m b
 mkCore = let
   execute = fmap (fmap mkCore) . runCompilation
-  insertItem' (Accept g) x = eitherExecute $ create g (index x) x (depmask x) Nothing
+  insertItem' (Accept g) y x = eitherExecute $ create g y x (depmask x) Nothing
   deleteItem' (Accept g) x = eitherExecute $ erase g x
   touchItem' (Accept g) x = eitherExecute $ touch g x
   mkCore g = Core (insertItem' g) (deleteItem' g) (touchItem' g) 
@@ -122,7 +122,7 @@ mkManager ::  (Ord b, Functor m, Monad m) => (b -> Item m b) -> Manager m b
 mkManager mkItem = let  
         update t (Difference ns ds ts) = flip runContT return  $ callCC $ \k -> Right <$> do
               let folder f t n = lift (f t n) >>= either (k . Left) return
-              t' <- foldM (folder insertItem) t $ map mkItem ns
+              t' <- foldM (folder $ uncurry . insertItem) t $ map (id &&& mkItem) ns
               t'' <- foldM (folder deleteItem) t' ds
               Manager . update <$> foldM (folder touchItem) t'' ts
         in Manager (update mkCore)
