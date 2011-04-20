@@ -35,16 +35,17 @@ import Control.Monad.Writer (tell, WriterT, runWriterT, listen, lift, foldM)
 import Data.List.Difference (Difference (..))
 import qualified Dependency.Graph as DG (Graph)
 import Dependency.Graph  hiding (Graph)
+import Data.Dependant (Depmask (..))
 
 
 import Control.Monad.Cont
 
+
 -- | Item values must be supplied by the clients. They provide build and destroy actions for them. 
 -- Their dependencies are expressed with a matching function on indices. Clients can choose monad and index type.
 data Ord b => Item m b = Item 
-  { build :: m [(b,Item m b)] -- ^ building action which return new 'Item''s, evaluated when this item is to be built
+  { build :: m [(b,Depmask b (Item m))] -- ^ building action which return new 'Item''s, evaluated when this item is to be built
   , unlink :: m ()        -- ^ destroying action, evaluated when this item is to be deleted
-  , depmask :: b -> Bool  -- ^ all indices matching will be logical dependencies for this item. Inaccurate selectors can lead to 'Cycle' error
   }
 
 -- Each manager action can lead to a problem with indices signalled in IndexError 
@@ -52,7 +53,7 @@ type Result m b = m (Either IndexError (Core m b))
 
 -- A manager is what's to be held to track dependencies
 data Core m b = Core 
-  { insertItem :: b -> Item m b -> Result m b --  insert new items in the manager
+  { insertItem :: b -> Depmask b (Item m) -> Result m b --  insert new items in the manager
   , deleteItem :: b -> Result m b --  schedule deletion of items by index
   , touchItem :: b -> Result m b --  schedule touch of items of index
   }
@@ -61,7 +62,7 @@ data Core m b = Core
 type Graph m b = DG.Graph (Item m b) b
 
 -- helped by Writer monad to collect new items from build actions
-type Collecting m b = WriterT [(b,(b,Item m b))] m 
+type Collecting m b = WriterT [(b,(b,Depmask b (Item m)))] m 
 
 -- compile until graph goes in accept mode. New items with their keys are collected by telling
 compile :: (Ord b, Functor m, Monad m) => Graph m b -> Collecting m b (Graph m b)
@@ -79,8 +80,8 @@ type ErrorGraph m b = Either IndexError (Graph m b)
 -- core of the folding of recursive compiling the new itemes collected on builds. 
 -- It crashes on Present state of the graph, which must be handled by compile
 --
-amend :: Ord b => Graph m b -> (b, (b,Item m b)) -> ErrorGraph m b
-amend (Accept g) (j,(y,i)) = create g y i (depmask i) (Just j) 
+amend :: Ord b => Graph m b -> (b, (b,Depmask b (Item m))) -> ErrorGraph m b
+amend (Accept g) (j,(y,i)) = create g y (dependant i) (depmask i) (Just j) 
 amend _ _ = error "Dependency.Manager: compiling was not completed"
 
 -- add a ContT monad layer to come out straight of recursion. The result of the computation is already forced to ErrorGraph. 
@@ -104,7 +105,7 @@ runCompilation g = fmap fst . runWriterT . flip runContT return $ callCC $ \k ->
 mkCore ::  (Ord b , Functor m, Monad m) => Core m b
 mkCore = let
   execute = fmap (fmap mkCore) . runCompilation
-  insertItem' (Accept g) y x = eitherExecute $ create g y x (depmask x) Nothing
+  insertItem' (Accept g) y x = eitherExecute $ create g y (dependant x) (depmask x) Nothing
   deleteItem' (Accept g) x = eitherExecute $ erase g x
   touchItem' (Accept g) x = eitherExecute $ touch g x
   mkCore g = Core (insertItem' g) (deleteItem' g) (touchItem' g) 
@@ -118,7 +119,7 @@ newtype Manager m b =  Manager {
   }
 
 -- | Build a 'Manager' given an 'Item' creator.
-mkManager ::  (Ord b, Functor m, Monad m) => (b -> Item m b) -> Manager m b
+mkManager ::  (Ord b, Functor m, Monad m) => (b -> Depmask b (Item m)) -> Manager m b
 mkManager mkItem = let  
         update t (Difference ns ds ts) = flip runContT return  $ callCC $ \k -> Right <$> do
               let folder f t n = lift (f t n) >>= either (k . Left) return

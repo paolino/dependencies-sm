@@ -9,6 +9,7 @@ import Dependency.Manager (Item (..))
 import Control.Applicative ((<$>))
 import Control.Arrow ((&&&))
 
+import Data.Dependant (Depmask (..), fmapDepmask)
 import Compiler.Interface 
 import Compiler.Resources
 import Dependency.Manager (mkManager, Manager)
@@ -16,24 +17,20 @@ import Dependency.Manager (mkManager, Manager)
 
 --  Maps compilers with a resource provider to an 'Item' builder
 mkItem :: (Monad m , Ord b)
-  => (b -> Compiler m k b)  -- ^ base compilers for new resources , from dsl
+  => (b -> Depmask b (Compiler m k))  -- ^ base compilers for new resources , from dsl
   -> Resources m k b      -- ^ resource manager
   -> b                  -- ^ a new index
-  -> Item m b           -- ^ an item for the 'Dependency.Manager.insertItem'
+  -> Depmask b (Item m)  -- ^ an item for the 'Dependency.Manager.insertItem'
 mkItem cs s x = mkItem' (x,cs x) where
-  mkItem' (z,Compiler co ds) = Item 
-    { build = let 
-          build' co = case co of
-            Completed (y,cs) -> y >>= update s z >> return (map (fst &&& mkItem') cs)
-            Compile m f  -> select s m >>= f  >>= build'
-          in build' co
-    , unlink = delete s z
-    , depmask = ds
-    }
+    mkItem' (z,y) = f z `fmapDepmask` y
+    f z co = Item (build' z co) (delete s z)
+    build' z co = case co of
+      Completed (y,cs) -> y >>= update s z >> return (map (fst &&& mkItem') cs)
+      Compile (Depmask ds (Fromdeps f))  -> select s ds >>= f >>= build' z
 
--- | Build a 'Manager' where each 'Item' is projected from a 'Compiler'
+-- | Build a 'Manager' where each 'Item' is projected from a 'DCompiler'
 mkCompilerManager ::  (Functor m, Monad m , Ord b)
-  => (b -> Compiler m k b)  -- ^ base compiler selector for new resources 
+  => (b -> Depmask b (Compiler m k))  -- ^ base compiler selector for new resources 
   -> Resources m k b      -- ^ resource manager
   -> Manager m b          -- ^ a fresh manager
 mkCompilerManager cs = mkManager . mkItem cs
