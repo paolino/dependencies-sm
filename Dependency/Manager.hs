@@ -19,10 +19,12 @@ module Dependency.Manager
   ( 
   -- * Interfacing to the module
     Item (..)
+  ,  Depmask (..)
   -- * Operational elements
   , Manager 
-  , update
+  , step
   , mkManager
+
   -- * From "Dependency.Graph"
   , IndexError (..)
   -- * From "Data.List.Difference"
@@ -35,11 +37,18 @@ import Control.Monad.Writer (tell, WriterT, runWriterT, listen, lift, foldM)
 import Data.List.Difference (Difference (..))
 import qualified Dependency.Graph as DG (Graph)
 import Dependency.Graph  hiding (Graph)
-import Data.Dependant (Depmask (..))
 
 
 import Control.Monad.Cont
 
+-- | A common structure, with an expression of dependency aside a value
+data Depmask b a = Depmask {
+  depmask :: b -> Bool, -- ^ dependencies selector
+  dependant :: a     -- ^ value depending on the selection
+  }
+
+instance Functor (Depmask a) where
+  f `fmap` (Depmask ds x) = Depmask ds (f x)
 
 -- | Item values must be supplied by the clients. They provide build and destroy actions for them. 
 -- Their dependencies are expressed with a matching function on indices. Clients can choose monad and index type.
@@ -115,7 +124,7 @@ mkCore = let
 
 -- | A stepping manager for 'Item's.
 newtype Manager m b =  Manager {
-  update ::  Difference b -> m (Either IndexError (Manager m b)) -- ^ updates the manager from a 'Difference' on indices
+  step ::  Difference b -> m (Either IndexError (Manager m b)) -- ^ updates the manager from a 'Difference' on indices
   }
 
 -- | Build a 'Manager' given an 'Item' creator.

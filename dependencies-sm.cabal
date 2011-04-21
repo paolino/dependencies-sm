@@ -50,11 +50,9 @@ Library
   Exposed-modules: 
     Compiler.Manager
     Compiler.Resources
-    Compiler.Interface
     Dependency.Manager
     Dependency.Graph
     Data.List.Difference
-    Data.Dependant
     Data.Bijection
   -- Packages needed in order to build this package.
   Build-depends:       
